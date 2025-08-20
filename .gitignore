@@ -1,0 +1,14 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+app/app_log/
+/venv
+env/
+node_modules/
+.env
+.env
+.env
+./vapi/keys.json
+./vapi/func_calling.py
+./vapi/dumping_data.py

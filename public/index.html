@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supabase API Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #333;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 10px;
+    }
+    .card {
+      background-color: #f9f9f9;
+      border-radius: 5px;
+      padding: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .nav {
+      margin-bottom: 20px;
+    }
+    .nav a {
+      margin-right: 15px;
+      text-decoration: none;
+      color: #0066cc;
+    }
+  </style>
+</head>
+<body>
+  <h1>Supabase API Test</h1>
+  
+  <div class="nav">
+    <a href="/">Home</a>
+    <a href="/client">Add Client</a>
+  </div>
+
+  <div class="card">
+    <h2>Test Connection</h2>
+    <button id="testConnection">Test Supabase Connection</button>
+    <div id="connectionResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Get All Users</h2>
+    <button id="getUsers">Get Users</button>
+    <div id="usersResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Add New User</h2>
+    <form id="addUserForm">
+      <div class="form-group">
+        <label for="clientId">Client ID:</label>
+        <input type="text" id="clientId" name="client_id" required>
+      </div>
+      <div class="form-group">
+        <label for="firstName">First Name:</label>
+        <input type="text" id="firstName" name="first_name">
+      </div>
+      <div class="form-group">
+        <label for="lastName">Last Name:</label>
+        <input type="text" id="lastName" name="last_name">
+      </div>
+      <div class="form-group">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email">
+      </div>
+      <div class="form-group">
+        <label for="phone">Phone:</label>
+        <input type="text" id="phone" name="phone">
+      </div>
+      <div class="form-group">
+        <label for="appRoleId">App Role ID:</label>
+        <input type="text" id="appRoleId" name="app_role_id">
+      </div>
+      <button type="submit">Add User</button>
+    </form>
+    <div id="addUserResult"></div>
+  </div>
+
+  <script>
+    // Test connection
+    document.getElementById('testConnection').addEventListener('click', async () => {
+      const resultDiv = document.getElementById('connectionResult');
+      resultDiv.innerHTML = '<p>Testing connection...</p>';
+      
+      try {
+        const response = await fetch('/api/test-connection');
+        const data = await response.json();
+        
+        resultDiv.innerHTML = `
+          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
+          <p>Message: ${data.message}</p>
+          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
+      }
+    });
+
+    // Get users
+    document.getElementById('getUsers').addEventListener('click', async () => {
+      const resultDiv = document.getElementById('usersResult');
+      resultDiv.innerHTML = '<p>Loading users...</p>';
+      
+      try {
+        const response = await fetch('/api/users');
+        const data = await response.json();
+        
+        resultDiv.innerHTML = `
+          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
+          <p>Count: ${data.count || 0}</p>
+          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
+      }
+    });
+
+    // Add user
+    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const resultDiv = document.getElementById('addUserResult');
+      resultDiv.innerHTML = '<p>Adding user...</p>';
+      
+      const formData = new FormData(e.target);
+      const userData = {};
+      
+      formData.forEach((value, key) => {
+        if (value) userData[key] = value;
+      });
+      
+      try {
+        const response = await fetch('/api/client-users', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(userData)
+        });
+        
+        const data = await response.json();
+        
+        resultDiv.innerHTML = `
+          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
+          <p>Message: ${data.message || ''}</p>
+          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
+        `;
+      } catch (error) {
+        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
+      }
+    });
+  </script>
+</body>
+</html>
