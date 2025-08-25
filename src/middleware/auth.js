@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const logger = require('../utils/logger');
 
 const authenticateToken = async (req, res, next) => {
@@ -17,41 +17,48 @@ const authenticateToken = async (req, res, next) => {
         // Verify JWT token
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
 
-        // Get user with roles and permissions
-        const userResult = await query(`
-      SELECT 
-        u.id, u.tenant_id, u.email, u.first_name, u.last_name, u.phone, u.status,
-        u.last_login, u.created_at, u.updated_at,
-        t.name as tenant_name, t.domain as tenant_domain,
-        json_agg(
-          json_build_object(
-            'id', r.id,
-            'name', r.name,
-            'description', r.description,
-            'permissions', r.permissions,
-            'is_system_role', r.is_system_role
-          )
-        ) as roles
-      FROM users u
-      LEFT JOIN tenants t ON u.tenant_id = t.id
-      LEFT JOIN user_roles ur ON u.id = ur.user_id
-      LEFT JOIN roles r ON ur.role_id = r.id
-      WHERE u.id = $1 AND u.status = 'active'
-      GROUP BY u.id, t.name, t.domain
-    `, [decoded.userId]);
+        // Get user with tenant information
+        const { data: userResult, error: userError } = await supabase
+            .from('users')
+            .select(`
+                id, tenant_id, email, first_name, last_name, phone, status,
+                last_login, created_at, updated_at,
+                tenants!inner(name, domain)
+            `)
+            .eq('id', decoded.userId)
+            .eq('status', 'active')
+            .single();
 
-        if (userResult.rows.length === 0) {
+        if (userError || !userResult) {
             return res.status(401).json({
                 error: 'Invalid token',
                 message: 'User not found or inactive'
             });
         }
 
-        const user = userResult.rows[0];
+        const user = userResult;
+
+        // Get user roles separately
+        const { data: rolesResult, error: rolesError } = await supabase
+            .from('user_roles')
+            .select(`
+                roles!inner(id, name, description, permissions, is_system_role)
+            `)
+            .eq('user_id', user.id);
+
+        if (rolesError) {
+            logger.error('Error fetching user roles:', rolesError);
+            return res.status(500).json({
+                error: 'Server error',
+                message: 'Failed to fetch user roles'
+            });
+        }
+
+        const roles = rolesResult.map(ur => ur.roles);
 
         // Flatten permissions from all roles
         const allPermissions = new Set();
-        user.roles.forEach(role => {
+        roles.forEach(role => {
             if (role.permissions) {
                 role.permissions.forEach(permission => allPermissions.add(permission));
             }
@@ -67,10 +74,10 @@ const authenticateToken = async (req, res, next) => {
             phone: user.phone,
             status: user.status,
             tenant: {
-                name: user.tenant_name,
-                domain: user.tenant_domain
+                name: user.tenants.name,
+                domain: user.tenants.domain
             },
-            roles: user.roles,
+            roles: roles,
             permissions: Array.from(allPermissions)
         };
 

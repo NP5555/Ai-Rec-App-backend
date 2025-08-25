@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { body, validationResult, query } = require('express-validator');
-const { query: dbQuery } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const { authenticateToken, requirePermission, requireAnyPermission } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -18,65 +18,80 @@ router.get('/', requirePermission('users:read'), async (req, res) => {
         const { page = 1, limit = 10, search, status, role } = req.query;
         const offset = (page - 1) * limit;
 
-        let whereClause = 'WHERE u.tenant_id = $1';
-        let params = [req.user.tenantId];
-        let paramCount = 1;
+        let query = supabase
+            .from('users')
+            .select(`
+                id, email, first_name, last_name, phone, status, 
+                last_login, created_at, updated_at,
+                user_roles!inner(
+                    roles!inner(id, name, description)
+                )
+            `)
+            .eq('tenant_id', req.user.tenantId);
 
+        // Apply filters
         if (search) {
-            paramCount++;
-            whereClause += ` AND (u.email ILIKE $${paramCount} OR u.first_name ILIKE $${paramCount} OR u.last_name ILIKE $${paramCount})`;
-            params.push(`%${search}%`);
+            query = query.or(`email.ilike.%${search}%,first_name.ilike.%${search}%,last_name.ilike.%${search}%`);
         }
 
         if (status) {
-            paramCount++;
-            whereClause += ` AND u.status = $${paramCount}`;
-            params.push(status);
+            query = query.eq('status', status);
         }
 
         if (role) {
-            paramCount++;
-            whereClause += ` AND r.name = $${paramCount}`;
-            params.push(role);
+            query = query.eq('user_roles.roles.name', role);
         }
 
-        // Get users with roles
-        const usersResult = await dbQuery(`
-      SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.phone, u.status, 
-        u.last_login, u.created_at, u.updated_at,
-        json_agg(
-          json_build_object(
-            'id', r.id,
-            'name', r.name,
-            'description', r.description
-          )
-        ) as roles
-      FROM users u
-      LEFT JOIN user_roles ur ON u.id = ur.user_id
-      LEFT JOIN roles r ON ur.role_id = r.id
-      ${whereClause}
-      GROUP BY u.id
-      ORDER BY u.created_at DESC
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `, [...params, limit, offset]);
+        // Get total count first
+        const { count: total, error: countError } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', req.user.tenantId);
 
-        // Get total count
-        const countResult = await dbQuery(`
-      SELECT COUNT(DISTINCT u.id) as total
-      FROM users u
-      LEFT JOIN user_roles ur ON u.id = ur.user_id
-      LEFT JOIN roles r ON ur.role_id = r.id
-      ${whereClause}
-    `, params);
+        if (countError) {
+            logger.error('Error getting user count:', countError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get user count'
+            });
+        }
 
-        const total = parseInt(countResult.rows[0].total);
+        // Apply pagination
+        query = query.range(offset, offset + limit - 1);
+        query = query.order('created_at', { ascending: false });
+
+        const { data: users, error: usersError } = await query;
+
+        if (usersError) {
+            logger.error('Error fetching users:', usersError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch users'
+            });
+        }
+
+        // Transform the data to match expected format
+        const transformedUsers = users.map(user => ({
+            id: user.id,
+            email: user.email,
+            firstName: user.first_name,
+            lastName: user.last_name,
+            phone: user.phone,
+            status: user.status,
+            lastLogin: user.last_login,
+            createdAt: user.created_at,
+            updatedAt: user.updated_at,
+            roles: user.user_roles.map(ur => ur.roles)
+        }));
+
         const totalPages = Math.ceil(total / limit);
 
         res.json({
             success: true,
             data: {
-                users: usersResult.rows,
+                users: transformedUsers,
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
@@ -103,26 +118,36 @@ router.get('/:id', requirePermission('users:read'), async (req, res) => {
     try {
         const { id } = req.params;
 
-        const userResult = await dbQuery(`
-      SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.phone, u.status, 
-        u.last_login, u.created_at, u.updated_at,
-        json_agg(
-          json_build_object(
-            'id', r.id,
-            'name', r.name,
-            'description', r.description,
-            'permissions', r.permissions
-          )
-        ) as roles
-      FROM users u
-      LEFT JOIN user_roles ur ON u.id = ur.user_id
-      LEFT JOIN roles r ON ur.role_id = r.id
-      WHERE u.id = $1 AND u.tenant_id = $2
-      GROUP BY u.id
-    `, [id, req.user.tenantId]);
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select(`
+                id, email, first_name, last_name, phone, status, 
+                last_login, created_at, updated_at,
+                user_roles!inner(
+                    roles!inner(id, name, description, permissions, is_system_role)
+                )
+            `)
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (userResult.rows.length === 0) {
+        if (userError) {
+            logger.error('Error fetching user by ID:', userError);
+            if (userError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                    message: 'The requested user does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch user by ID'
+            });
+        }
+
+        if (!user) {
             return res.status(404).json({
                 success: false,
                 error: 'User not found',
@@ -133,7 +158,18 @@ router.get('/:id', requirePermission('users:read'), async (req, res) => {
         res.json({
             success: true,
             data: {
-                user: userResult.rows[0]
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    phone: user.phone,
+                    status: user.status,
+                    lastLogin: user.last_login,
+                    createdAt: user.created_at,
+                    updatedAt: user.updated_at,
+                    roles: user.user_roles.map(ur => ur.roles)
+                }
             }
         });
 
@@ -172,12 +208,23 @@ router.post('/', [
         const { email, password, firstName, lastName, phone, roleIds, status = 'active' } = req.body;
 
         // Check if user already exists in the same tenant
-        const existingUser = await dbQuery(
-            'SELECT id FROM users WHERE email = $1 AND tenant_id = $2',
-            [email, req.user.tenantId]
-        );
+        const { data: existingUser, error: existingUserError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingUser.rows.length > 0) {
+        if (existingUserError) {
+            logger.error('Error checking for existing user:', existingUserError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing user'
+            });
+        }
+
+        if (existingUser) {
             return res.status(409).json({
                 success: false,
                 error: 'User already exists',
@@ -190,29 +237,58 @@ router.post('/', [
         const passwordHash = await bcrypt.hash(password, salt);
 
         // Create user
-        const userResult = await dbQuery(`
-      INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, phone, status)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, email, first_name, last_name, phone, status, created_at
-    `, [req.user.tenantId, email, passwordHash, firstName, lastName, phone || null, status]);
+        const { data: newUser, error: newUserError } = await supabase
+            .from('users')
+            .insert({
+                id: supabase.helpers.createId(),
+                tenant_id: req.user.tenantId,
+                email: email,
+                password_hash: passwordHash,
+                first_name: firstName,
+                last_name: lastName,
+                phone: phone || null,
+                status: status
+            })
+            .select()
+            .single();
 
-        const newUser = userResult.rows[0];
+        if (newUserError) {
+            logger.error('Error creating user:', newUserError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create user'
+            });
+        }
 
         // Assign roles
         for (const roleId of roleIds) {
-            await dbQuery(`
-        INSERT INTO user_roles (id, user_id, role_id, assigned_by)
-        VALUES (gen_random_uuid(), $1, $2, $3)
-      `, [newUser.id, roleId, req.user.id]);
+            await supabase
+                .from('user_roles')
+                .insert({
+                    id: supabase.helpers.createId(),
+                    user_id: newUser.id,
+                    role_id: roleId,
+                    assigned_by: req.user.id
+                });
         }
 
         // Get assigned roles
-        const rolesResult = await dbQuery(`
-      SELECT r.id, r.name, r.description, r.permissions, r.is_system_role
-      FROM user_roles ur
-      JOIN roles r ON ur.role_id = r.id
-      WHERE ur.user_id = $1
-    `, [newUser.id]);
+        const { data: rolesResult, error: rolesError } = await supabase
+            .from('user_roles')
+            .select(`
+                roles!inner(id, name, description, permissions, is_system_role)
+            `)
+            .eq('user_id', newUser.id);
+
+        if (rolesError) {
+            logger.error('Error fetching assigned roles:', rolesError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch assigned roles'
+            });
+        }
 
         res.status(201).json({
             success: true,
@@ -225,7 +301,7 @@ router.post('/', [
                     lastName: newUser.last_name,
                     phone: newUser.phone,
                     status: newUser.status,
-                    roles: rolesResult.rows
+                    roles: rolesResult.map(ur => ur.roles)
                 }
             }
         });
@@ -270,12 +346,30 @@ router.put('/:id', [
         const { email, firstName, lastName, phone, status, roleIds } = req.body;
 
         // Check if user exists and belongs to tenant
-        const existingUser = await dbQuery(
-            'SELECT id FROM users WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingUser, error: existingUserError } = await supabase
+            .from('users')
+            .select('id, tenant_id')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingUser.rows.length === 0) {
+        if (existingUserError) {
+            logger.error('Error checking for existing user:', existingUserError);
+            if (existingUserError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                    message: 'The requested user does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing user'
+            });
+        }
+
+        if (!existingUser) {
             return res.status(404).json({
                 success: false,
                 error: 'User not found',
@@ -285,12 +379,24 @@ router.put('/:id', [
 
         // Check if email is being changed and if it's already taken
         if (email) {
-            const emailCheck = await dbQuery(
-                'SELECT id FROM users WHERE email = $1 AND tenant_id = $2 AND id != $3',
-                [email, req.user.tenantId, id]
-            );
+            const { data: emailCheck, error: emailCheckError } = await supabase
+                .from('users')
+                .select('id')
+                .eq('email', email)
+                .eq('tenant_id', req.user.tenantId)
+                .neq('id', id)
+                .single();
 
-            if (emailCheck.rows.length > 0) {
+            if (emailCheckError) {
+                logger.error('Error checking for existing email:', emailCheckError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to check for existing email'
+                });
+            }
+
+            if (emailCheck) {
                 return res.status(409).json({
                     success: false,
                     error: 'Email already exists',
@@ -341,54 +447,75 @@ router.put('/:id', [
             paramCount++;
             updateParams.push(req.user.tenantId);
 
-            await dbQuery(`
-        UPDATE users 
-        SET ${updateFields.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount - 1} AND tenant_id = $${paramCount}
-      `, updateParams);
+            await supabase
+                .from('users')
+                .update({
+                    [updateFields.join(', ')]: updateParams
+                })
+                .eq('id', id)
+                .eq('tenant_id', req.user.tenantId);
         }
 
         // Update roles if provided
         if (roleIds && Array.isArray(roleIds)) {
             // Remove existing roles
-            await dbQuery(
-                'DELETE FROM user_roles WHERE user_id = $1',
-                [id]
-            );
+            await supabase
+                .from('user_roles')
+                .delete()
+                .eq('user_id', id);
 
             // Assign new roles
             for (const roleId of roleIds) {
-                await dbQuery(`
-          INSERT INTO user_roles (id, user_id, role_id, assigned_by)
-          VALUES (gen_random_uuid(), $1, $2, $3)
-        `, [id, roleId, req.user.id]);
+                await supabase
+                    .from('user_roles')
+                    .insert({
+                        id: supabase.helpers.createId(),
+                        user_id: id,
+                        role_id: roleId,
+                        assigned_by: req.user.id
+                    });
             }
         }
 
         // Get updated user with roles
-        const updatedUserResult = await dbQuery(`
-      SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.phone, u.status, 
-        u.last_login, u.created_at, u.updated_at,
-        json_agg(
-          json_build_object(
-            'id', r.id,
-            'name', r.name,
-            'description', r.description
-          )
-        ) as roles
-      FROM users u
-      LEFT JOIN user_roles ur ON u.id = ur.user_id
-      LEFT JOIN roles r ON ur.role_id = r.id
-      WHERE u.id = $1 AND u.tenant_id = $2
-      GROUP BY u.id
-    `, [id, req.user.tenantId]);
+        const { data: updatedUserResult, error: updatedUserError } = await supabase
+            .from('users')
+            .select(`
+                id, email, first_name, last_name, phone, status, 
+                last_login, created_at, updated_at,
+                user_roles!inner(
+                    roles!inner(id, name, description)
+                )
+            `)
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
+
+        if (updatedUserError) {
+            logger.error('Error fetching updated user:', updatedUserError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch updated user'
+            });
+        }
 
         res.json({
             success: true,
             message: 'User updated successfully',
             data: {
-                user: updatedUserResult.rows[0]
+                user: {
+                    id: updatedUserResult.id,
+                    email: updatedUserResult.email,
+                    firstName: updatedUserResult.first_name,
+                    lastName: updatedUserResult.last_name,
+                    phone: updatedUserResult.phone,
+                    status: updatedUserResult.status,
+                    lastLogin: updatedUserResult.last_login,
+                    createdAt: updatedUserResult.created_at,
+                    updatedAt: updatedUserResult.updated_at,
+                    roles: updatedUserResult.user_roles.map(ur => ur.roles)
+                }
             }
         });
 
@@ -415,12 +542,30 @@ router.delete('/:id', requirePermission('users:delete'), async (req, res) => {
         const { id } = req.params;
 
         // Check if user exists and belongs to tenant
-        const existingUser = await dbQuery(
-            'SELECT id, email FROM users WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingUser, error: existingUserError } = await supabase
+            .from('users')
+            .select('id, email')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingUser.rows.length === 0) {
+        if (existingUserError) {
+            logger.error('Error checking for existing user:', existingUserError);
+            if (existingUserError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                    message: 'The requested user does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing user'
+            });
+        }
+
+        if (!existingUser) {
             return res.status(404).json({
                 success: false,
                 error: 'User not found',
@@ -438,10 +583,11 @@ router.delete('/:id', requirePermission('users:delete'), async (req, res) => {
         }
 
         // Delete user (cascade will handle user_roles)
-        await dbQuery(
-            'DELETE FROM users WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        await supabase
+            .from('users')
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId);
 
         res.json({
             success: true,
@@ -450,7 +596,7 @@ router.delete('/:id', requirePermission('users:delete'), async (req, res) => {
 
         logger.info('User deleted successfully', {
             userId: id,
-            userEmail: existingUser.rows[0].email,
+            userEmail: existingUser.email,
             deletedBy: req.user.id
         });
 
@@ -486,12 +632,30 @@ router.post('/:id/reset-password', [
         const { newPassword } = req.body;
 
         // Check if user exists and belongs to tenant
-        const existingUser = await dbQuery(
-            'SELECT id FROM users WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingUser, error: existingUserError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingUser.rows.length === 0) {
+        if (existingUserError) {
+            logger.error('Error checking for existing user:', existingUserError);
+            if (existingUserError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found',
+                    message: 'The requested user does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing user'
+            });
+        }
+
+        if (!existingUser) {
             return res.status(404).json({
                 success: false,
                 error: 'User not found',
@@ -504,10 +668,11 @@ router.post('/:id/reset-password', [
         const passwordHash = await bcrypt.hash(newPassword, salt);
 
         // Update password
-        await dbQuery(
-            'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-            [passwordHash, id]
-        );
+        await supabase
+            .from('users')
+            .update({ password_hash: passwordHash })
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId);
 
         res.json({
             success: true,

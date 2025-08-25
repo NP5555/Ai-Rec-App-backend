@@ -39,6 +39,8 @@ A comprehensive Node.js/Express.js backend for the AI Receptionist system with u
 - npm or yarn
 
 > **📖 For detailed Supabase setup instructions, see [SUPABASE_SETUP.md](./SUPABASE_SETUP.md)**
+>
+> **⚠️ If you're having issues with an empty database, see [DATABASE_SETUP.md](./DATABASE_SETUP.md) for troubleshooting**
 
 ### Installation
 
@@ -59,10 +61,14 @@ cp env.example .env
 # Get your Supabase connection string from:
 # Supabase Dashboard > Settings > Database > Connection string > URI
 
-# Run migrations
+# For empty databases, it's recommended to use the manual setup method:
+# 1. Go to Supabase SQL Editor
+# 2. Run the SQL from src/database/migrations.sql
+
+# Or use the automated approach (requires execute_sql function):
 npm run migrate
 
-# Seed initial data
+# After tables are created, seed initial data:
 npm run seed
 ```
 
@@ -350,6 +356,10 @@ curl -X POST http://localhost:3000/api/auth/login \
 curl -X GET http://localhost:3000/api/users \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
+
+### API Documentation (Swagger)
+
+After starting the server, open `http://localhost:3000/api-docs` to view interactive API docs generated from the OpenAPI spec at `src/docs/openapi.yaml`. Authenticated routes use Bearer JWT; click "Authorize" and paste your token.
 
 ### Create User
 

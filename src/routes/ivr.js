@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -32,24 +32,45 @@ router.post('/entry', [
         logger.info('IVR Entry received', { tenantId, did, from, to, callId });
 
         // Create call session
-        await query(`
-      INSERT INTO call_sessions (id, tenant_id, call_id, from_number, to_number, did, started_at, status, path)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'active', $7)
-    `, [tenantId, callId, from, to, did, ts || new Date().toISOString(), JSON.stringify([{
-            nodeId: 'entry',
-            action: 'call_received',
-            at: new Date().toISOString(),
-            data: { did, from, to }
-        }])]);
+        const { error: sessionError } = await supabase
+            .from('call_sessions')
+            .insert({
+                id: supabase.helpers.createId(),
+                tenant_id: tenantId,
+                call_id: callId,
+                from_number: from,
+                to_number: to,
+                did: did,
+                started_at: ts || new Date().toISOString(),
+                status: 'active',
+                path: JSON.stringify([{
+                    nodeId: 'entry',
+                    action: 'call_received',
+                    at: new Date().toISOString(),
+                    data: { did, from, to }
+                }])
+            });
+
+        if (sessionError) {
+            logger.error('Error creating call session:', sessionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create call session'
+            });
+        }
 
         // Get IVR flow configuration
-        const flowResult = await query(`
-      SELECT flow_config FROM ivr_flows 
-      WHERE tenant_id = $1 AND is_active = true 
-      ORDER BY created_at DESC LIMIT 1
-    `, [tenantId]);
+        const { data: flowResult, error: flowError } = await supabase
+            .from('ivr_flows')
+            .select('flow_config')
+            .eq('tenant_id', tenantId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
 
-        if (flowResult.rows.length === 0) {
+        if (flowError || !flowResult) {
             // Default IVR flow if none configured
             const defaultFlow = {
                 greeting: 'Welcome. Please press 1 for Sales, 2 for Support, 3 for Billing, or dial an extension.',
@@ -79,30 +100,35 @@ router.post('/entry', [
             });
         }
 
-        const flowConfig = flowResult.rows[0].flow_config;
+        const flowConfig = flowResult.flow_config;
 
         // Log the entry step
-        await query(`
-      UPDATE call_sessions 
-      SET path = jsonb_array_append(path, $1)
-      WHERE call_id = $2
-    `, [JSON.stringify({
-            nodeId: 'ivr_entry',
-            action: 'ivr_greeting',
-            at: new Date().toISOString(),
-            data: { flow: flowConfig.name }
-        }), callId]);
+        const { error: updateError } = await supabase
+            .from('call_sessions')
+            .update({
+                path: supabase.sql`jsonb_array_append(path, ${JSON.stringify({
+                    nodeId: 'ivr_entry',
+                    action: 'ivr_greeting',
+                    at: new Date().toISOString(),
+                    data: { flow: flowConfig.name }
+                })}::jsonb)`
+            })
+            .eq('call_id', callId);
+
+        if (updateError) {
+            logger.error('Error updating call session path:', updateError);
+        }
 
         res.json({
             success: true,
             callId,
             action: 'gather',
             params: {
-                greeting: flowConfig.greeting,
-                timeout: flowConfig.timeout,
-                max_digits: flowConfig.max_digits,
-                retries: flowConfig.retries,
-                options: flowConfig.options
+                greeting: flowConfig.greeting || 'Welcome. How may I help you?',
+                timeout: flowConfig.timeout || 10,
+                max_digits: flowConfig.max_digits || 4,
+                retries: flowConfig.retries || 3,
+                options: flowConfig.options || {}
             }
         });
 
@@ -111,7 +137,7 @@ router.post('/entry', [
         res.status(500).json({
             success: false,
             error: 'Server error',
-            message: 'An error occurred processing the call entry'
+            message: 'An error occurred during IVR entry'
         });
     }
 });
@@ -141,16 +167,21 @@ router.post('/event', [
         logger.info('IVR Event received', { tenantId, callId, event, data });
 
         // Log the event
-        await query(`
-      UPDATE call_sessions 
-      SET path = jsonb_array_append(path, $1)
-      WHERE call_id = $2
-    `, [JSON.stringify({
-            nodeId: 'ivr_event',
-            action: event,
-            at: new Date().toISOString(),
-            data: data || {}
-        }), callId]);
+        const { error: updateError } = await supabase
+            .from('call_sessions')
+            .update({
+                path: supabase.sql`jsonb_array_append(path, ${JSON.stringify({
+                    nodeId: 'ivr_event',
+                    action: event,
+                    at: new Date().toISOString(),
+                    data: data || {}
+                })}::jsonb)`
+            })
+            .eq('call_id', callId);
+
+        if (updateError) {
+            logger.error('Error updating call session path:', updateError);
+        }
 
         let action = 'hangup';
         let params = { reason: 'call_ended' };
@@ -160,14 +191,20 @@ router.post('/event', [
                 // Handle DTMF menu selection
                 const digit = data?.digit;
                 if (digit) {
-                    const flowResult = await query(`
-            SELECT flow_config FROM ivr_flows 
-            WHERE tenant_id = $1 AND is_active = true 
-            ORDER BY created_at DESC LIMIT 1
-          `, [tenantId]);
+                    const { data: flowResult, error: flowError } = await supabase
+                        .from('ivr_flows')
+                        .select('flow_config')
+                        .eq('tenant_id', tenantId)
+                        .eq('is_active', true)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .single();
 
-                    if (flowResult.rows.length > 0) {
-                        const flowConfig = flowResult.rows[0].flow_config;
+                    if (flowError || !flowResult) {
+                        action = 'ai';
+                        params = { prompt: 'I didn\'t recognize that option. How can I help you?' };
+                    } else {
+                        const flowConfig = flowResult.flow_config;
                         const option = flowConfig.options[digit];
 
                         if (option) {
@@ -175,24 +212,25 @@ router.post('/event', [
                             params = option.params;
                         } else {
                             // Handle extension dialing
-                            const extensionResult = await query(`
-                SELECT e.*, d.name as department_name 
-                FROM extensions e 
-                LEFT JOIN departments d ON e.department_id = d.id
-                WHERE e.tenant_id = $1 AND e.extension_number = $2 AND e.status = 'active'
-              `, [tenantId, digit]);
+                            const { data: extensionResult, error: extensionError } = await supabase
+                                .from('extensions')
+                                .select('extension_number, name, dial_plan')
+                                .eq('tenant_id', tenantId)
+                                .eq('extension_number', digit)
+                                .eq('status', 'active')
+                                .single();
 
-                            if (extensionResult.rows.length > 0) {
-                                const extension = extensionResult.rows[0];
+                            if (extensionError || !extensionResult) {
+                                action = 'ai';
+                                params = { prompt: 'I didn\'t recognize that option. How can I help you?' };
+                            } else {
+                                const extension = extensionResult;
                                 action = 'extension';
                                 params = {
                                     extension: extension.extension_number,
                                     name: extension.name,
                                     dialPlan: extension.dial_plan
                                 };
-                            } else {
-                                action = 'ai';
-                                params = { prompt: 'I didn\'t recognize that option. How can I help you?' };
                             }
                         }
                     }
@@ -203,24 +241,25 @@ router.post('/event', [
                 // Handle extension dialing
                 const extensionNumber = data?.extension;
                 if (extensionNumber) {
-                    const extensionResult = await query(`
-            SELECT e.*, d.name as department_name 
-            FROM extensions e 
-            LEFT JOIN departments d ON e.department_id = d.id
-            WHERE e.tenant_id = $1 AND e.extension_number = $2 AND e.status = 'active'
-          `, [tenantId, extensionNumber]);
+                    const { data: extensionResult, error: extensionError } = await supabase
+                        .from('extensions')
+                        .select('extension_number, name, dial_plan')
+                        .eq('tenant_id', tenantId)
+                        .eq('extension_number', extensionNumber)
+                        .eq('status', 'active')
+                        .single();
 
-                    if (extensionResult.rows.length > 0) {
-                        const extension = extensionResult.rows[0];
+                    if (extensionError || !extensionResult) {
+                        action = 'ai';
+                        params = { prompt: 'Extension not found. How can I help you?' };
+                    } else {
+                        const extension = extensionResult;
                         action = 'extension';
                         params = {
                             extension: extension.extension_number,
                             name: extension.name,
                             dialPlan: extension.dial_plan
                         };
-                    } else {
-                        action = 'ai';
-                        params = { prompt: 'Extension not found. How can I help you?' };
                     }
                 }
                 break;
@@ -238,26 +277,24 @@ router.post('/event', [
                 // Handle department dialing
                 const departmentName = data?.department;
                 if (departmentName) {
-                    const deptResult = await query(`
-            SELECT d.*, 
-                   json_agg(e.*) as extensions
-            FROM departments d
-            LEFT JOIN extensions e ON d.id = e.department_id AND e.status = 'active'
-            WHERE d.tenant_id = $1 AND d.name = $2
-            GROUP BY d.id
-          `, [tenantId, departmentName]);
+                    const { data: deptResult, error: deptError } = await supabase
+                        .from('departments')
+                        .select('name, settings, extensions')
+                        .eq('tenant_id', tenantId)
+                        .eq('name', departmentName)
+                        .single();
 
-                    if (deptResult.rows.length > 0) {
-                        const department = deptResult.rows[0];
+                    if (deptError || !deptResult) {
+                        action = 'voicemail';
+                        params = { message: 'Department not available. Please leave a message.' };
+                    } else {
+                        const department = deptResult;
                         action = 'dept';
                         params = {
                             department: department.name,
                             greeting: department.settings?.greeting || `Connecting you to ${department.name}`,
                             extensions: department.extensions || []
                         };
-                    } else {
-                        action = 'voicemail';
-                        params = { message: 'Department not available. Please leave a message.' };
                     }
                 }
                 break;
@@ -342,11 +379,14 @@ router.post('/log', [
         logger.info('IVR Log received', { tenantId, callId, cdr });
 
         // Get call session
-        const callResult = await query(`
-      SELECT * FROM call_sessions WHERE call_id = $1 AND tenant_id = $2
-    `, [callId, tenantId]);
+        const { data: callResult, error: callError } = await supabase
+            .from('call_sessions')
+            .select('*')
+            .eq('call_id', callId)
+            .eq('tenant_id', tenantId)
+            .single();
 
-        if (callResult.rows.length === 0) {
+        if (callError || !callResult) {
             return res.status(404).json({
                 success: false,
                 error: 'Call not found',
@@ -354,8 +394,8 @@ router.post('/log', [
             });
         }
 
-        const callSession = callResult.rows[0];
-        const path = callSession.path || [];
+        const callSession = callResult;
+        const path = JSON.parse(callSession.path || '[]');
 
         // Determine outcome based on path
         let outcome = 'unknown';
@@ -403,32 +443,25 @@ router.post('/log', [
         const durationSeconds = Math.round((endTime - startTime) / 1000);
 
         // Update call session
-        await query(`
-      UPDATE call_sessions 
-      SET 
-        status = 'completed',
-        ended_at = $1,
-        outcome = $2,
-        duration_seconds = $3,
-        tags = $4,
-        cdr = $5,
-        total_steps = $6,
-        ai_steps = $7,
-        api_calls = $8,
-        path = $9
-      WHERE call_id = $10
-    `, [
-            endTime.toISOString(),
-            outcome,
-            durationSeconds,
-            JSON.stringify(tags),
-            JSON.stringify(cdr || {}),
-            totalSteps,
-            aiSteps,
-            apiCalls,
-            JSON.stringify(path),
-            callId
-        ]);
+        const { error: updateError } = await supabase
+            .from('call_sessions')
+            .update({
+                status: 'completed',
+                ended_at: endTime.toISOString(),
+                outcome: outcome,
+                duration_seconds: durationSeconds,
+                tags: JSON.stringify(tags),
+                cdr: JSON.stringify(cdr || {}),
+                total_steps: totalSteps,
+                ai_steps: aiSteps,
+                api_calls: apiCalls,
+                path: JSON.stringify(path)
+            })
+            .eq('call_id', callId);
+
+        if (updateError) {
+            logger.error('Error updating call session:', updateError);
+        }
 
         res.json({
             success: true,

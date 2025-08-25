@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const { authenticateToken, requireSuperAdmin } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -18,51 +18,71 @@ router.get('/', async (req, res) => {
         const { page = 1, limit = 10, search, status } = req.query;
         const offset = (page - 1) * limit;
 
-        let whereClause = 'WHERE 1=1';
-        let params = [];
-        let paramCount = 0;
+        let query = supabase
+            .from('tenants')
+            .select(`
+                id, name, domain, status, settings, created_at, updated_at,
+                users!left(id),
+                extensions!left(id)
+            `);
 
+        // Apply filters
         if (search) {
-            paramCount++;
-            whereClause += ` AND (name ILIKE $${paramCount} OR domain ILIKE $${paramCount})`;
-            params.push(`%${search}%`);
+            query = query.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
         }
 
         if (status) {
-            paramCount++;
-            whereClause += ` AND status = $${paramCount}`;
-            params.push(status);
+            query = query.eq('status', status);
         }
 
-        // Get tenants with user count
-        const tenantsResult = await query(`
-      SELECT 
-        t.id, t.name, t.domain, t.status, t.settings, t.created_at, t.updated_at,
-        COUNT(DISTINCT u.id) as user_count,
-        COUNT(DISTINCT e.id) as extension_count
-      FROM tenants t
-      LEFT JOIN users u ON t.id = u.tenant_id
-      LEFT JOIN extensions e ON t.id = e.tenant_id
-      ${whereClause}
-      GROUP BY t.id
-      ORDER BY t.created_at DESC
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `, [...params, limit, offset]);
+        // Get total count first
+        const { count: total, error: countError } = await supabase
+            .from('tenants')
+            .select('*', { count: 'exact', head: true });
 
-        // Get total count
-        const countResult = await query(`
-      SELECT COUNT(*) as total
-      FROM tenants t
-      ${whereClause}
-    `, params);
+        if (countError) {
+            logger.error('Error getting tenant count:', countError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get tenant count'
+            });
+        }
 
-        const total = parseInt(countResult.rows[0].total);
+        // Apply pagination and ordering
+        query = query.range(offset, offset + limit - 1);
+        query = query.order('created_at', { ascending: false });
+
+        const { data: tenants, error: tenantsError } = await query;
+
+        if (tenantsError) {
+            logger.error('Error fetching tenants:', tenantsError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch tenants'
+            });
+        }
+
+        // Transform the data to match expected format
+        const transformedTenants = tenants.map(tenant => ({
+            id: tenant.id,
+            name: tenant.name,
+            domain: tenant.domain,
+            status: tenant.status,
+            settings: tenant.settings,
+            createdAt: tenant.created_at,
+            updatedAt: tenant.updated_at,
+            userCount: tenant.users ? tenant.users.length : 0,
+            extensionCount: tenant.extensions ? tenant.extensions.length : 0
+        }));
+
         const totalPages = Math.ceil(total / limit);
 
         res.json({
             success: true,
             data: {
-                tenants: tenantsResult.rows,
+                tenants: transformedTenants,
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
@@ -89,32 +109,50 @@ router.get('/:id', async (req, res) => {
     try {
         const { id } = req.params;
 
-        const tenantResult = await query(`
-      SELECT 
-        t.id, t.name, t.domain, t.status, t.settings, t.created_at, t.updated_at,
-        COUNT(DISTINCT u.id) as user_count,
-        COUNT(DISTINCT e.id) as extension_count,
-        COUNT(DISTINCT d.id) as department_count
-      FROM tenants t
-      LEFT JOIN users u ON t.id = u.tenant_id
-      LEFT JOIN extensions e ON t.id = e.tenant_id
-      LEFT JOIN departments d ON t.id = d.tenant_id
-      WHERE t.id = $1
-      GROUP BY t.id
-    `, [id]);
+        const tenantResult = await supabase
+            .from('tenants')
+            .select(`
+                id, name, domain, status, settings, created_at, updated_at,
+                users!left(id),
+                extensions!left(id),
+                departments!left(id)
+            `)
+            .eq('id', id)
+            .single();
 
-        if (tenantResult.rows.length === 0) {
-            return res.status(404).json({
+        if (tenantResult.error) {
+            if (tenantResult.error.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Tenant not found',
+                    message: 'The requested tenant does not exist'
+                });
+            }
+            logger.error('Error fetching tenant by ID:', tenantResult.error);
+            return res.status(500).json({
                 success: false,
-                error: 'Tenant not found',
-                message: 'The requested tenant does not exist'
+                error: 'Server error',
+                message: 'Failed to fetch tenant by ID'
             });
         }
+
+        const tenant = tenantResult.data;
 
         res.json({
             success: true,
             data: {
-                tenant: tenantResult.rows[0]
+                tenant: {
+                    id: tenant.id,
+                    name: tenant.name,
+                    domain: tenant.domain,
+                    status: tenant.status,
+                    settings: tenant.settings,
+                    createdAt: tenant.created_at,
+                    updatedAt: tenant.updated_at,
+                    userCount: tenant.users ? tenant.users.length : 0,
+                    extensionCount: tenant.extensions ? tenant.extensions.length : 0,
+                    departmentCount: tenant.departments ? tenant.departments.length : 0
+                }
             }
         });
 
@@ -150,12 +188,22 @@ router.post('/', [
         const { name, domain, settings = {} } = req.body;
 
         // Check if domain already exists
-        const existingTenant = await query(
-            'SELECT id FROM tenants WHERE domain = $1',
-            [domain]
-        );
+        const { data: existingTenant, error: domainError } = await supabase
+            .from('tenants')
+            .select('id')
+            .eq('domain', domain)
+            .single();
 
-        if (existingTenant.rows.length > 0) {
+        if (domainError) {
+            logger.error('Error checking domain existence:', domainError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check domain existence'
+            });
+        }
+
+        if (existingTenant) {
             return res.status(409).json({
                 success: false,
                 error: 'Domain already exists',
@@ -164,13 +212,26 @@ router.post('/', [
         }
 
         // Create tenant
-        const tenantResult = await query(`
-      INSERT INTO tenants (id, name, domain, status, settings)
-      VALUES (gen_random_uuid(), $1, $2, 'active', $3)
-      RETURNING id, name, domain, status, settings, created_at
-    `, [name, domain, JSON.stringify(settings)]);
+        const { data: newTenant, error: insertError } = await supabase
+            .from('tenants')
+            .insert([{
+                id: supabase.genId(),
+                name: name,
+                domain: domain,
+                status: 'active',
+                settings: JSON.stringify(settings)
+            }])
+            .select()
+            .single();
 
-        const newTenant = tenantResult.rows[0];
+        if (insertError) {
+            logger.error('Error creating tenant:', insertError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create tenant'
+            });
+        }
 
         res.status(201).json({
             success: true,
@@ -219,27 +280,47 @@ router.put('/:id', [
         const { name, domain, status, settings } = req.body;
 
         // Check if tenant exists
-        const existingTenant = await query(
-            'SELECT id, name, domain FROM tenants WHERE id = $1',
-            [id]
-        );
+        const { data: existingTenant, error: selectError } = await supabase
+            .from('tenants')
+            .select('id, name, domain')
+            .eq('id', id)
+            .single();
 
-        if (existingTenant.rows.length === 0) {
-            return res.status(404).json({
+        if (selectError) {
+            if (selectError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Tenant not found',
+                    message: 'The requested tenant does not exist'
+                });
+            }
+            logger.error('Error selecting tenant for update:', selectError);
+            return res.status(500).json({
                 success: false,
-                error: 'Tenant not found',
-                message: 'The requested tenant does not exist'
+                error: 'Server error',
+                message: 'Failed to select tenant for update'
             });
         }
 
         // Check if domain is being changed and if it's already taken
-        if (domain && domain !== existingTenant.rows[0].domain) {
-            const domainCheck = await query(
-                'SELECT id FROM tenants WHERE domain = $1 AND id != $2',
-                [domain, id]
-            );
+        if (domain && domain !== existingTenant.domain) {
+            const { data: domainCheck, error: domainCheckError } = await supabase
+                .from('tenants')
+                .select('id')
+                .eq('domain', domain)
+                .neq('id', id)
+                .single();
 
-            if (domainCheck.rows.length > 0) {
+            if (domainCheckError) {
+                logger.error('Error checking domain existence for update:', domainCheckError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to check domain existence for update'
+                });
+            }
+
+            if (domainCheck) {
                 return res.status(409).json({
                     success: false,
                     error: 'Domain already exists',
@@ -282,31 +363,50 @@ router.put('/:id', [
             paramCount++;
             updateParams.push(id);
 
-            await query(`
-        UPDATE tenants 
-        SET ${updateFields.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount}
-      `, updateParams);
+            const { error: updateError } = await supabase
+                .from('tenants')
+                .update({
+                    [updateFields.join(', ')]: updateParams
+                })
+                .eq('id', id);
+
+            if (updateError) {
+                logger.error('Error updating tenant:', updateError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to update tenant'
+                });
+            }
         }
 
         // Get updated tenant
-        const updatedTenantResult = await query(`
-      SELECT id, name, domain, status, settings, created_at, updated_at
-      FROM tenants
-      WHERE id = $1
-    `, [id]);
+        const { data: updatedTenant, error: selectUpdatedError } = await supabase
+            .from('tenants')
+            .select('id, name, domain, status, settings, created_at, updated_at')
+            .eq('id', id)
+            .single();
+
+        if (selectUpdatedError) {
+            logger.error('Error selecting updated tenant:', selectUpdatedError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to select updated tenant'
+            });
+        }
 
         res.json({
             success: true,
             message: 'Tenant updated successfully',
             data: {
-                tenant: updatedTenantResult.rows[0]
+                tenant: updatedTenant
             }
         });
 
         logger.info('Tenant updated successfully', {
             tenantId: id,
-            tenantName: updatedTenantResult.rows[0].name,
+            tenantName: updatedTenant.name,
             updatedBy: req.user.id
         });
 
@@ -328,26 +428,43 @@ router.delete('/:id', async (req, res) => {
         const { id } = req.params;
 
         // Check if tenant exists
-        const existingTenant = await query(
-            'SELECT id, name, domain FROM tenants WHERE id = $1',
-            [id]
-        );
+        const { data: existingTenant, error: selectError } = await supabase
+            .from('tenants')
+            .select('id, name, domain')
+            .eq('id', id)
+            .single();
 
-        if (existingTenant.rows.length === 0) {
-            return res.status(404).json({
+        if (selectError) {
+            if (selectError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Tenant not found',
+                    message: 'The requested tenant does not exist'
+                });
+            }
+            logger.error('Error selecting tenant for deletion:', selectError);
+            return res.status(500).json({
                 success: false,
-                error: 'Tenant not found',
-                message: 'The requested tenant does not exist'
+                error: 'Server error',
+                message: 'Failed to select tenant for deletion'
             });
         }
 
         // Check if tenant has any users
-        const userCountResult = await query(
-            'SELECT COUNT(*) as count FROM users WHERE tenant_id = $1',
-            [id]
-        );
+        const { count: userCount, error: userCountError } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', id);
 
-        const userCount = parseInt(userCountResult.rows[0].count);
+        if (userCountError) {
+            logger.error('Error getting user count for deletion:', userCountError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get user count for deletion'
+            });
+        }
+
         if (userCount > 0) {
             return res.status(400).json({
                 success: false,
@@ -357,10 +474,19 @@ router.delete('/:id', async (req, res) => {
         }
 
         // Delete tenant (cascade will handle related data)
-        await query(
-            'DELETE FROM tenants WHERE id = $1',
-            [id]
-        );
+        const { error: deleteError } = await supabase
+            .from('tenants')
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) {
+            logger.error('Error deleting tenant:', deleteError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to delete tenant'
+            });
+        }
 
         res.json({
             success: true,
@@ -369,7 +495,7 @@ router.delete('/:id', async (req, res) => {
 
         logger.info('Tenant deleted successfully', {
             tenantId: id,
-            tenantName: existingTenant.rows[0].name,
+            tenantName: existingTenant.name,
             deletedBy: req.user.id
         });
 
@@ -391,38 +517,57 @@ router.get('/:id/stats', async (req, res) => {
         const { id } = req.params;
 
         // Check if tenant exists
-        const tenantCheck = await query(
-            'SELECT id, name FROM tenants WHERE id = $1',
-            [id]
-        );
+        const { data: tenantCheck, error: selectError } = await supabase
+            .from('tenants')
+            .select('id, name')
+            .eq('id', id)
+            .single();
 
-        if (tenantCheck.rows.length === 0) {
-            return res.status(404).json({
+        if (selectError) {
+            if (selectError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Tenant not found',
+                    message: 'The requested tenant does not exist'
+                });
+            }
+            logger.error('Error selecting tenant for stats:', selectError);
+            return res.status(500).json({
                 success: false,
-                error: 'Tenant not found',
-                message: 'The requested tenant does not exist'
+                error: 'Server error',
+                message: 'Failed to select tenant for stats'
             });
         }
 
         // Get statistics
-        const statsResult = await query(`
-      SELECT 
-        (SELECT COUNT(*) FROM users WHERE tenant_id = $1) as total_users,
-        (SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND status = 'active') as active_users,
-        (SELECT COUNT(*) FROM extensions WHERE tenant_id = $1) as total_extensions,
-        (SELECT COUNT(*) FROM extensions WHERE tenant_id = $1 AND status = 'active') as active_extensions,
-        (SELECT COUNT(*) FROM departments WHERE tenant_id = $1) as total_departments,
-        (SELECT COUNT(*) FROM roles WHERE tenant_id = $1) as total_roles,
-        (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1) as total_calls,
-        (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '24 hours') as calls_today,
-        (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days') as calls_this_week
-    `, [id]);
+        const statsResult = await supabase
+            .from('tenants')
+            .select(`
+                (SELECT COUNT(*) FROM users WHERE tenant_id = $1) as total_users,
+                (SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND status = 'active') as active_users,
+                (SELECT COUNT(*) FROM extensions WHERE tenant_id = $1) as total_extensions,
+                (SELECT COUNT(*) FROM extensions WHERE tenant_id = $1 AND status = 'active') as active_extensions,
+                (SELECT COUNT(*) FROM departments WHERE tenant_id = $1) as total_departments,
+                (SELECT COUNT(*) FROM roles WHERE tenant_id = $1) as total_roles,
+                (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1) as total_calls,
+                (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '24 hours') as calls_today,
+                (SELECT COUNT(*) FROM call_sessions WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days') as calls_this_week
+            `, [id]);
+
+        if (statsResult.error) {
+            logger.error('Error fetching tenant stats:', statsResult.error);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch tenant statistics'
+            });
+        }
 
         res.json({
             success: true,
             data: {
-                tenant: tenantCheck.rows[0],
-                stats: statsResult.rows[0]
+                tenant: tenantCheck,
+                stats: statsResult.data[0]
             }
         });
 

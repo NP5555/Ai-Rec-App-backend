@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -29,17 +29,17 @@ router.post('/login', [
         const { email, password } = req.body;
 
         // Check if user exists
-        const userResult = await query(`
-      SELECT 
-        u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, 
-        u.phone, u.status, u.last_login,
-        t.name as tenant_name, t.domain as tenant_domain
-      FROM users u
-      LEFT JOIN tenants t ON u.tenant_id = t.id
-      WHERE u.email = $1
-    `, [email]);
+        const { data: userResult, error: userError } = await supabase
+            .from('users')
+            .select(`
+                id, tenant_id, email, password_hash, first_name, last_name, 
+                phone, status, last_login,
+                tenants!inner(name, domain)
+            `)
+            .eq('email', email)
+            .single();
 
-        if (userResult.rows.length === 0) {
+        if (userError || !userResult) {
             return res.status(401).json({
                 success: false,
                 error: 'Invalid credentials',
@@ -47,7 +47,7 @@ router.post('/login', [
             });
         }
 
-        const user = userResult.rows[0];
+        const user = userResult;
 
         // Check if user is active
         if (user.status !== 'active') {
@@ -69,15 +69,23 @@ router.post('/login', [
         }
 
         // Get user roles and permissions
-        const rolesResult = await query(`
-      SELECT 
-        r.id, r.name, r.description, r.permissions, r.is_system_role
-      FROM user_roles ur
-      JOIN roles r ON ur.role_id = r.id
-      WHERE ur.user_id = $1
-    `, [user.id]);
+        const { data: rolesResult, error: rolesError } = await supabase
+            .from('user_roles')
+            .select(`
+                roles!inner(id, name, description, permissions, is_system_role)
+            `)
+            .eq('user_id', user.id);
 
-        const roles = rolesResult.rows;
+        if (rolesError) {
+            logger.error('Error fetching user roles:', rolesError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch user roles'
+            });
+        }
+
+        const roles = rolesResult.map(ur => ur.roles);
         const allPermissions = new Set();
         roles.forEach(role => {
             if (role.permissions) {
@@ -86,10 +94,14 @@ router.post('/login', [
         });
 
         // Update last login
-        await query(
-            'UPDATE users SET last_login = NOW() WHERE id = $1',
-            [user.id]
-        );
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ last_login: new Date().toISOString() })
+            .eq('id', user.id);
+
+        if (updateError) {
+            logger.warn('Failed to update last login:', updateError);
+        }
 
         // Create JWT token
         const payload = {
@@ -120,8 +132,8 @@ router.post('/login', [
                     phone: user.phone,
                     status: user.status,
                     tenant: {
-                        name: user.tenant_name,
-                        domain: user.tenant_domain
+                        name: user.tenants.name,
+                        domain: user.tenants.domain
                     },
                     roles: roles,
                     permissions: Array.from(allPermissions)
@@ -166,12 +178,14 @@ router.post('/register', [
         const { email, password, firstName, lastName, phone, roleIds } = req.body;
 
         // Check if user already exists in the same tenant
-        const existingUser = await query(
-            'SELECT id FROM users WHERE email = $1 AND tenant_id = $2',
-            [email, req.user.tenantId]
-        );
+        const { data: existingUser, error: existingError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingUser.rows.length > 0) {
+        if (existingUser) {
             return res.status(409).json({
                 success: false,
                 error: 'User already exists',
@@ -184,29 +198,68 @@ router.post('/register', [
         const passwordHash = await bcrypt.hash(password, salt);
 
         // Create user
-        const userResult = await query(`
-      INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, phone, status)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'active')
-      RETURNING id, email, first_name, last_name, phone, status, created_at
-    `, [req.user.tenantId, email, passwordHash, firstName, lastName, phone || null]);
+        const { data: newUser, error: userError } = await supabase
+            .from('users')
+            .insert({
+                tenant_id: req.user.tenantId,
+                email: email,
+                password_hash: passwordHash,
+                first_name: firstName,
+                last_name: lastName,
+                phone: phone || null,
+                status: 'active'
+            })
+            .select('id, email, first_name, last_name, phone, status, created_at')
+            .single();
 
-        const newUser = userResult.rows[0];
+        if (userError) {
+            logger.error('Error creating user:', userError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create user'
+            });
+        }
 
         // Assign roles
-        for (const roleId of roleIds) {
-            await query(`
-        INSERT INTO user_roles (id, user_id, role_id, assigned_by)
-        VALUES (gen_random_uuid(), $1, $2, $3)
-      `, [newUser.id, roleId, req.user.id]);
+        const userRoleInserts = roleIds.map(roleId => ({
+            user_id: newUser.id,
+            role_id: roleId,
+            assigned_by: req.user.id
+        }));
+
+        const { error: rolesError } = await supabase
+            .from('user_roles')
+            .insert(userRoleInserts);
+
+        if (rolesError) {
+            logger.error('Error assigning roles:', rolesError);
+            // Rollback user creation if role assignment fails
+            await supabase
+                .from('users')
+                .delete()
+                .eq('id', newUser.id);
+            
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to assign roles to user'
+            });
         }
 
         // Get assigned roles
-        const rolesResult = await query(`
-      SELECT r.id, r.name, r.description, r.permissions, r.is_system_role
-      FROM user_roles ur
-      JOIN roles r ON ur.role_id = r.id
-      WHERE ur.user_id = $1
-    `, [newUser.id]);
+        const { data: rolesResult, error: rolesFetchError } = await supabase
+            .from('user_roles')
+            .select(`
+                roles!inner(id, name, description, permissions, is_system_role)
+            `)
+            .eq('user_id', newUser.id);
+
+        if (rolesFetchError) {
+            logger.error('Error fetching assigned roles:', rolesFetchError);
+        }
+
+        const roles = rolesResult ? rolesResult.map(ur => ur.roles) : [];
 
         res.status(201).json({
             success: true,
@@ -219,7 +272,7 @@ router.post('/register', [
                     lastName: newUser.last_name,
                     phone: newUser.phone,
                     status: newUser.status,
-                    roles: rolesResult.rows
+                    roles: roles
                 }
             }
         });

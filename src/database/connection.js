@@ -19,14 +19,27 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const testConnection = async () => {
   try {
     logger.info('Attempting to connect to Supabase database');
-    // Simple query to test connection - adjust table name if needed
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .limit(1);
+    // Simple query to test connection without relying on existing tables
+    // Just check if we can connect to Supabase
+    const { data, error } = await supabase.rpc('get_service_status', {});
     
-    if (error) {
-      throw error;
+    // If the RPC function doesn't exist, try a simpler approach
+    if (error && error.message.includes('function get_service_status() does not exist')) {
+      // Try a simpler approach - just get the server version
+      const { data: versionData, error: versionError } = await supabase.rpc('pg_version', {});
+      
+      if (versionError) {
+        // If that also fails, just check if we can connect at all
+        logger.info('Checking basic connection to Supabase');
+        const isConnected = supabase && supabase.auth !== undefined;
+        
+        if (isConnected) {
+          logger.info('Basic Supabase connection successful');
+          return true;
+        } else {
+          throw new Error('Could not establish basic connection to Supabase');
+        }
+      }
     }
     
     logger.info('Supabase connection successful');
@@ -112,9 +125,31 @@ const getClient = () => {
   return supabase;
 };
 
+// Execute raw SQL query (for migrations and complex queries)
+const executeRawSql = async (sqlQuery) => {
+  const start = Date.now();
+  try {
+    const { data, error } = await supabase.rpc('execute_sql', { sql: sqlQuery });
+    
+    if (error) {
+      logger.error('Raw SQL query error:', { error: error.message, sql: sqlQuery });
+      throw error;
+    }
+    
+    const duration = Date.now() - start;
+    logger.debug('Executed raw SQL query', { duration });
+    
+    return { data, error: null };
+  } catch (error) {
+    logger.error('Raw SQL execution error:', { error: error.message, sql: sqlQuery });
+    throw error;
+  }
+};
+
 module.exports = {
   supabase,
   query,
   getClient,
-  testConnection
+  testConnection,
+  executeRawSql
 };

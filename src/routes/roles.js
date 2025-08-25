@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const { authenticateToken, requirePermission, requireSuperAdmin } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -17,50 +17,73 @@ router.get('/', requirePermission('roles:read'), async (req, res) => {
         const { page = 1, limit = 10, search, isSystemRole } = req.query;
         const offset = (page - 1) * limit;
 
-        let whereClause = 'WHERE r.tenant_id = $1';
-        let params = [req.user.tenantId];
-        let paramCount = 1;
+        let query = supabase
+            .from('roles')
+            .select(`
+                id, name, description, permissions, is_system_role,
+                created_at, updated_at,
+                user_roles!left(user_id)
+            `)
+            .eq('tenant_id', req.user.tenantId);
 
+        // Apply filters
         if (search) {
-            paramCount++;
-            whereClause += ` AND (r.name ILIKE $${paramCount} OR r.description ILIKE $${paramCount})`;
-            params.push(`%${search}%`);
+            query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
         }
 
         if (isSystemRole !== undefined) {
-            paramCount++;
-            whereClause += ` AND r.is_system_role = $${paramCount}`;
-            params.push(isSystemRole === 'true');
+            query = query.eq('is_system_role', isSystemRole === 'true');
         }
 
-        // Get roles with user count
-        const rolesResult = await query(`
-      SELECT 
-        r.id, r.name, r.description, r.permissions, r.is_system_role,
-        r.created_at, r.updated_at,
-        COUNT(ur.user_id) as user_count
-      FROM roles r
-      LEFT JOIN user_roles ur ON r.id = ur.role_id
-      ${whereClause}
-      GROUP BY r.id
-      ORDER BY r.is_system_role DESC, r.created_at ASC
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `, [...params, limit, offset]);
+        // Get total count first
+        const { count: total, error: countError } = await supabase
+            .from('roles')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', req.user.tenantId);
 
-        // Get total count
-        const countResult = await query(`
-      SELECT COUNT(*) as total
-      FROM roles r
-      ${whereClause}
-    `, params);
+        if (countError) {
+            logger.error('Error getting role count:', countError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get role count'
+            });
+        }
 
-        const total = parseInt(countResult.rows[0].total);
+        // Apply pagination and ordering
+        query = query.range(offset, offset + limit - 1);
+        query = query.order('is_system_role', { ascending: false });
+        query = query.order('created_at', { ascending: true });
+
+        const { data: roles, error: rolesError } = await query;
+
+        if (rolesError) {
+            logger.error('Error fetching roles:', rolesError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch roles'
+            });
+        }
+
+        // Transform the data to match expected format
+        const transformedRoles = roles.map(role => ({
+            id: role.id,
+            name: role.name,
+            description: role.description,
+            permissions: role.permissions,
+            isSystemRole: role.is_system_role,
+            createdAt: role.created_at,
+            updatedAt: role.updated_at,
+            userCount: role.user_roles ? role.user_roles.length : 0
+        }));
+
         const totalPages = Math.ceil(total / limit);
 
         res.json({
             success: true,
             data: {
-                roles: rolesResult.rows,
+                roles: transformedRoles,
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
@@ -87,26 +110,34 @@ router.get('/:id', requirePermission('roles:read'), async (req, res) => {
     try {
         const { id } = req.params;
 
-        const roleResult = await query(`
-      SELECT 
-        r.id, r.name, r.description, r.permissions, r.is_system_role,
-        r.created_at, r.updated_at,
-        json_agg(
-          json_build_object(
-            'id', u.id,
-            'email', u.email,
-            'firstName', u.first_name,
-            'lastName', u.last_name
-          )
-        ) as users
-      FROM roles r
-      LEFT JOIN user_roles ur ON r.id = ur.role_id
-      LEFT JOIN users u ON ur.user_id = u.id
-      WHERE r.id = $1 AND r.tenant_id = $2
-      GROUP BY r.id
-    `, [id, req.user.tenantId]);
+        const { data: role, error: roleError } = await supabase
+            .from('roles')
+            .select(`
+                id, name, description, permissions, is_system_role,
+                created_at, updated_at,
+                user_roles!left(user_id)
+            `)
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (roleResult.rows.length === 0) {
+        if (roleError) {
+            logger.error('Error fetching role by ID:', roleError);
+            if (roleError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Role not found',
+                    message: 'The requested role does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch role by ID'
+            });
+        }
+
+        if (!role) {
             return res.status(404).json({
                 success: false,
                 error: 'Role not found',
@@ -114,10 +145,27 @@ router.get('/:id', requirePermission('roles:read'), async (req, res) => {
             });
         }
 
+        // Transform the data to match expected format
+        const transformedRole = {
+            id: role.id,
+            name: role.name,
+            description: role.description,
+            permissions: role.permissions,
+            isSystemRole: role.is_system_role,
+            createdAt: role.created_at,
+            updatedAt: role.updated_at,
+            users: role.user_roles ? role.user_roles.map(ur => ({
+                id: ur.user_id,
+                email: ur.users.email,
+                firstName: ur.users.first_name,
+                lastName: ur.users.last_name
+            })) : []
+        };
+
         res.json({
             success: true,
             data: {
-                role: roleResult.rows[0]
+                role: transformedRole
             }
         });
 
@@ -154,12 +202,23 @@ router.post('/', [
         const { name, description, permissions } = req.body;
 
         // Check if role name already exists in the same tenant
-        const existingRole = await query(
-            'SELECT id FROM roles WHERE name = $1 AND tenant_id = $2',
-            [name, req.user.tenantId]
-        );
+        const { data: existingRole, error: existingRoleError } = await supabase
+            .from('roles')
+            .select('id')
+            .eq('name', name)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingRole.rows.length > 0) {
+        if (existingRoleError) {
+            logger.error('Error checking existing role:', existingRoleError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check existing role'
+            });
+        }
+
+        if (existingRole) {
             return res.status(409).json({
                 success: false,
                 error: 'Role already exists',
@@ -168,13 +227,27 @@ router.post('/', [
         }
 
         // Create role
-        const roleResult = await query(`
-      INSERT INTO roles (id, tenant_id, name, description, permissions, is_system_role)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, false)
-      RETURNING id, name, description, permissions, is_system_role, created_at
-    `, [req.user.tenantId, name, description || null, JSON.stringify(permissions)]);
+        const { data: newRole, error: newRoleError } = await supabase
+            .from('roles')
+            .insert({
+                id: supabase.genId(),
+                tenant_id: req.user.tenantId,
+                name: name,
+                description: description || null,
+                permissions: JSON.stringify(permissions),
+                is_system_role: false
+            })
+            .select()
+            .single();
 
-        const newRole = roleResult.rows[0];
+        if (newRoleError) {
+            logger.error('Error creating role:', newRoleError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create role'
+            });
+        }
 
         res.status(201).json({
             success: true,
@@ -224,12 +297,30 @@ router.put('/:id', [
         const { name, description, permissions } = req.body;
 
         // Check if role exists and belongs to tenant
-        const existingRole = await query(
-            'SELECT id, name, is_system_role FROM roles WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingRole, error: existingRoleError } = await supabase
+            .from('roles')
+            .select('id, name, is_system_role')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingRole.rows.length === 0) {
+        if (existingRoleError) {
+            logger.error('Error checking existing role for update:', existingRoleError);
+            if (existingRoleError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Role not found',
+                    message: 'The requested role does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check existing role for update'
+            });
+        }
+
+        if (!existingRole) {
             return res.status(404).json({
                 success: false,
                 error: 'Role not found',
@@ -237,10 +328,8 @@ router.put('/:id', [
             });
         }
 
-        const role = existingRole.rows[0];
-
         // Prevent modification of system roles (except by super admin)
-        if (role.is_system_role && !req.user.permissions.includes('system:admin')) {
+        if (existingRole.is_system_role && !req.user.permissions.includes('system:admin')) {
             return res.status(403).json({
                 success: false,
                 error: 'Cannot modify system role',
@@ -249,13 +338,25 @@ router.put('/:id', [
         }
 
         // Check if name is being changed and if it's already taken
-        if (name && name !== role.name) {
-            const nameCheck = await query(
-                'SELECT id FROM roles WHERE name = $1 AND tenant_id = $2 AND id != $3',
-                [name, req.user.tenantId, id]
-            );
+        if (name && name !== existingRole.name) {
+            const { data: nameCheck, error: nameCheckError } = await supabase
+                .from('roles')
+                .select('id')
+                .eq('name', name)
+                .eq('tenant_id', req.user.tenantId)
+                .eq('id', id)
+                .single();
 
-            if (nameCheck.rows.length > 0) {
+            if (nameCheckError) {
+                logger.error('Error checking name uniqueness for update:', nameCheckError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to check name uniqueness for update'
+                });
+            }
+
+            if (nameCheck) {
                 return res.status(409).json({
                     success: false,
                     error: 'Role name already exists',
@@ -294,31 +395,52 @@ router.put('/:id', [
             paramCount++;
             updateParams.push(req.user.tenantId);
 
-            await query(`
-        UPDATE roles 
-        SET ${updateFields.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount - 1} AND tenant_id = $${paramCount}
-      `, updateParams);
+            const { error: updateError } = await supabase
+                .from('roles')
+                .update({
+                    [updateFields.join(', ')]: updateParams
+                })
+                .eq('id', id)
+                .eq('tenant_id', req.user.tenantId);
+
+            if (updateError) {
+                logger.error('Error updating role:', updateError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to update role'
+                });
+            }
         }
 
         // Get updated role
-        const updatedRoleResult = await query(`
-      SELECT id, name, description, permissions, is_system_role, created_at, updated_at
-      FROM roles
-      WHERE id = $1 AND tenant_id = $2
-    `, [id, req.user.tenantId]);
+        const { data: updatedRole, error: updatedRoleError } = await supabase
+            .from('roles')
+            .select('id, name, description, permissions, is_system_role, created_at, updated_at')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
+
+        if (updatedRoleError) {
+            logger.error('Error fetching updated role:', updatedRoleError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch updated role'
+            });
+        }
 
         res.json({
             success: true,
             message: 'Role updated successfully',
             data: {
-                role: updatedRoleResult.rows[0]
+                role: updatedRole
             }
         });
 
         logger.info('Role updated successfully', {
             roleId: id,
-            roleName: updatedRoleResult.rows[0].name,
+            roleName: updatedRole.name,
             updatedBy: req.user.id
         });
 
@@ -340,12 +462,30 @@ router.delete('/:id', requirePermission('roles:delete'), async (req, res) => {
         const { id } = req.params;
 
         // Check if role exists and belongs to tenant
-        const existingRole = await query(
-            'SELECT id, name, is_system_role FROM roles WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingRole, error: existingRoleError } = await supabase
+            .from('roles')
+            .select('id, name, is_system_role')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingRole.rows.length === 0) {
+        if (existingRoleError) {
+            logger.error('Error checking existing role for deletion:', existingRoleError);
+            if (existingRoleError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Role not found',
+                    message: 'The requested role does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check existing role for deletion'
+            });
+        }
+
+        if (!existingRole) {
             return res.status(404).json({
                 success: false,
                 error: 'Role not found',
@@ -353,10 +493,8 @@ router.delete('/:id', requirePermission('roles:delete'), async (req, res) => {
             });
         }
 
-        const role = existingRole.rows[0];
-
         // Prevent deletion of system roles (except by super admin)
-        if (role.is_system_role && !req.user.permissions.includes('system:admin')) {
+        if (existingRole.is_system_role && !req.user.permissions.includes('system:admin')) {
             return res.status(403).json({
                 success: false,
                 error: 'Cannot delete system role',
@@ -365,25 +503,44 @@ router.delete('/:id', requirePermission('roles:delete'), async (req, res) => {
         }
 
         // Check if role is assigned to any users
-        const userCountResult = await query(
-            'SELECT COUNT(*) as count FROM user_roles WHERE role_id = $1',
-            [id]
-        );
+        const { count: userCount, error: userCountError } = await supabase
+            .from('user_roles')
+            .select('*', { count: 'exact' })
+            .eq('role_id', id);
 
-        const userCount = parseInt(userCountResult.rows[0].count);
-        if (userCount > 0) {
+        if (userCountError) {
+            logger.error('Error getting user count for deletion:', userCountError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get user count for deletion'
+            });
+        }
+
+        const userCountInt = parseInt(userCount);
+        if (userCountInt > 0) {
             return res.status(400).json({
                 success: false,
                 error: 'Role in use',
-                message: `Cannot delete role. It is assigned to ${userCount} user(s). Please reassign or remove users first.`
+                message: `Cannot delete role. It is assigned to ${userCountInt} user(s). Please reassign or remove users first.`
             });
         }
 
         // Delete role
-        await query(
-            'DELETE FROM roles WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { error: deleteError } = await supabase
+            .from('roles')
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId);
+
+        if (deleteError) {
+            logger.error('Error deleting role:', deleteError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to delete role'
+            });
+        }
 
         res.json({
             success: true,
@@ -392,7 +549,7 @@ router.delete('/:id', requirePermission('roles:delete'), async (req, res) => {
 
         logger.info('Role deleted successfully', {
             roleId: id,
-            roleName: role.name,
+            roleName: existingRole.name,
             deletedBy: req.user.id
         });
 
@@ -416,12 +573,30 @@ router.get('/:id/users', requirePermission('roles:read'), async (req, res) => {
         const offset = (page - 1) * limit;
 
         // Check if role exists and belongs to tenant
-        const roleCheck = await query(
-            'SELECT id, name FROM roles WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: roleCheck, error: roleCheckError } = await supabase
+            .from('roles')
+            .select('id, name')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (roleCheck.rows.length === 0) {
+        if (roleCheckError) {
+            logger.error('Error checking role for user assignment:', roleCheckError);
+            if (roleCheckError.code === 'PGRST116') { // Not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Role not found',
+                    message: 'The requested role does not exist'
+                });
+            }
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check role for user assignment'
+            });
+        }
+
+        if (!roleCheck) {
             return res.status(404).json({
                 success: false,
                 error: 'Role not found',
@@ -430,36 +605,51 @@ router.get('/:id/users', requirePermission('roles:read'), async (req, res) => {
         }
 
         // Get users assigned to this role
-        const usersResult = await query(`
-      SELECT 
-        u.id, u.email, u.first_name, u.last_name, u.phone, u.status,
-        u.last_login, u.created_at,
-        ur.assigned_at, ur.assigned_by,
-        assigned_by_user.email as assigned_by_email
-      FROM user_roles ur
-      JOIN users u ON ur.user_id = u.id
-      LEFT JOIN users assigned_by_user ON ur.assigned_by = assigned_by_user.id
-      WHERE ur.role_id = $1 AND u.tenant_id = $2
-      ORDER BY ur.assigned_at DESC
-      LIMIT $3 OFFSET $4
-    `, [id, req.user.tenantId, limit, offset]);
+        const { data: users, error: usersError } = await supabase
+            .from('user_roles')
+            .select(`
+                u.id, u.email, u.first_name, u.last_name, u.phone, u.status,
+                u.last_login, u.created_at,
+                ur.assigned_at, ur.assigned_by,
+                assigned_by_user.email as assigned_by_email
+            `)
+            .eq('ur.role_id', id)
+            .eq('u.tenant_id', req.user.tenantId)
+            .range(offset, offset + limit - 1)
+            .order('ur.assigned_at', { ascending: false });
+
+        if (usersError) {
+            logger.error('Error fetching users for role:', usersError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch users for role'
+            });
+        }
 
         // Get total count
-        const countResult = await query(`
-      SELECT COUNT(*) as total
-      FROM user_roles ur
-      JOIN users u ON ur.user_id = u.id
-      WHERE ur.role_id = $1 AND u.tenant_id = $2
-    `, [id, req.user.tenantId]);
+        const { count: total, error: countError } = await supabase
+            .from('user_roles')
+            .select('*', { count: 'exact' })
+            .eq('ur.role_id', id)
+            .eq('u.tenant_id', req.user.tenantId);
 
-        const total = parseInt(countResult.rows[0].total);
+        if (countError) {
+            logger.error('Error getting user count for role:', countError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get user count for role'
+            });
+        }
+
         const totalPages = Math.ceil(total / limit);
 
         res.json({
             success: true,
             data: {
-                role: roleCheck.rows[0],
-                users: usersResult.rows,
+                role: roleCheck,
+                users: users,
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),

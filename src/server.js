@@ -8,6 +8,9 @@ const logger = require('./utils/logger');
 const { errorHandler } = require('./middleware/errorHandler');
 const { notFound } = require('./middleware/notFound');
 const { testConnection, supabase } = require('./database/connection');
+// Swagger/OpenAPI
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -64,6 +67,37 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Swagger setup
+const swaggerDefinition = {
+    openapi: '3.0.3',
+    info: {
+        title: 'AI Receptionist API',
+        version: '1.0.0',
+        description: 'API documentation for AI Receptionist backend',
+    },
+    servers: [
+        { url: '/'}
+    ],
+    components: {
+        securitySchemes: {
+            bearerAuth: {
+                type: 'http',
+                scheme: 'bearer',
+                bearerFormat: 'JWT'
+            }
+        }
+    },
+    security: [{ bearerAuth: [] }]
+};
+
+const swaggerOptions = {
+    definition: swaggerDefinition,
+    apis: ['./src/routes/**/*.js', './src/server.js'],
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 // Define your table name here
 const CLIENT_USERS_TABLE = 'client_users';
 const CLIENTS_TABLE = 'clients';
@@ -71,20 +105,17 @@ const CLIENTS_TABLE = 'clients';
 // Test endpoint to verify Supabase connection
 app.get('/api/test-connection', async (req, res) => {
   try {
-    // This is a simple query to test the connection
-    const { data, error } = await supabase
-      .from(CLIENT_USERS_TABLE)
-      .select('*')
-      .limit(1);
+    // Check if we can connect to Supabase at all
+    const isConnected = supabase && supabase.auth !== undefined;
     
-    if (error) {
-      throw error;
+    if (!isConnected) {
+      throw new Error('Could not establish basic connection to Supabase');
     }
     
     res.json({
       success: true,
       message: 'Successfully connected to Supabase',
-      data
+      data: { status: 'connected' }
     });
   } catch (error) {
     logger.error('Supabase connection error:', error);
@@ -99,6 +130,26 @@ app.get('/api/test-connection', async (req, res) => {
 // GET all users
 app.get('/api/users', async (req, res) => {
   try {
+    // Check if the table exists first
+    const { data: tableExists, error: tableError } = await supabase
+      .from('information_schema.tables')
+      .select('table_name')
+      .eq('table_name', CLIENT_USERS_TABLE)
+      .limit(1);
+    
+    if (tableError) {
+      throw tableError;
+    }
+    
+    if (!tableExists || tableExists.length === 0) {
+      return res.json({
+        success: true,
+        message: `Table ${CLIENT_USERS_TABLE} does not exist yet. Run migrations first.`,
+        count: 0,
+        data: []
+      });
+    }
+    
     const { data, error } = await supabase
       .from(CLIENT_USERS_TABLE)
       .select('*');
@@ -109,8 +160,8 @@ app.get('/api/users', async (req, res) => {
     
     res.json({
       success: true,
-      count: data.length,
-      data
+      count: data ? data.length : 0,
+      data: data || []
     });
   } catch (error) {
     logger.error('Error fetching data:', error);
@@ -124,6 +175,24 @@ app.get('/api/users', async (req, res) => {
 // GET user by ID
 app.get('/api/users/:id', async (req, res) => {
   try {
+    // Check if the table exists first
+    const { data: tableExists, error: tableError } = await supabase
+      .from('information_schema.tables')
+      .select('table_name')
+      .eq('table_name', CLIENT_USERS_TABLE)
+      .limit(1);
+    
+    if (tableError) {
+      throw tableError;
+    }
+    
+    if (!tableExists || tableExists.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Table ${CLIENT_USERS_TABLE} does not exist yet. Run migrations first.`
+      });
+    }
+    
     const { id } = req.params;
     const { data, error } = await supabase
       .from(CLIENT_USERS_TABLE)

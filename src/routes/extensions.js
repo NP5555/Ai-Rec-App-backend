@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { query } = require('../database/connection');
+const { supabase } = require('../database/connection');
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
@@ -17,58 +17,83 @@ router.get('/', requirePermission('extensions:read'), async (req, res) => {
         const { page = 1, limit = 10, search, status, department } = req.query;
         const offset = (page - 1) * limit;
 
-        let whereClause = 'WHERE e.tenant_id = $1';
-        let params = [req.user.tenantId];
-        let paramCount = 1;
+        let query = supabase
+            .from('extensions')
+            .select(`
+                id, extension_number, name, description, dial_plan, status,
+                created_at, updated_at,
+                departments!left(id, name),
+                users!left(id, email, first_name, last_name)
+            `)
+            .eq('tenant_id', req.user.tenantId);
 
+        // Apply filters
         if (search) {
-            paramCount++;
-            whereClause += ` AND (e.extension_number ILIKE $${paramCount} OR e.name ILIKE $${paramCount})`;
-            params.push(`%${search}%`);
+            query = query.or(`extension_number.ilike.%${search}%,name.ilike.%${search}%`);
         }
 
         if (status) {
-            paramCount++;
-            whereClause += ` AND e.status = $${paramCount}`;
-            params.push(status);
+            query = query.eq('status', status);
         }
 
         if (department) {
-            paramCount++;
-            whereClause += ` AND d.name = $${paramCount}`;
-            params.push(department);
+            query = query.eq('departments.name', department);
         }
 
-        // Get extensions with department info
-        const extensionsResult = await query(`
-      SELECT 
-        e.id, e.extension_number, e.name, e.description, e.dial_plan, e.status,
-        e.created_at, e.updated_at,
-        d.id as department_id, d.name as department_name,
-        u.id as user_id, u.email as user_email, u.first_name, u.last_name
-      FROM extensions e
-      LEFT JOIN departments d ON e.department_id = d.id
-      LEFT JOIN users u ON e.user_id = u.id
-      ${whereClause}
-      ORDER BY e.extension_number
-      LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
-    `, [...params, limit, offset]);
+        // Get total count first
+        const { count: total, error: countError } = await supabase
+            .from('extensions')
+            .select('*', { count: 'exact', head: true })
+            .eq('tenant_id', req.user.tenantId);
 
-        // Get total count
-        const countResult = await query(`
-      SELECT COUNT(*) as total
-      FROM extensions e
-      LEFT JOIN departments d ON e.department_id = d.id
-      ${whereClause}
-    `, params);
+        if (countError) {
+            logger.error('Error getting extension count:', countError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to get extension count'
+            });
+        }
 
-        const total = parseInt(countResult.rows[0].total);
+        // Apply pagination and ordering
+        query = query.range(offset, offset + limit - 1);
+        query = query.order('extension_number', { ascending: true });
+
+        const { data: extensions, error: extensionsError } = await query;
+
+        if (extensionsError) {
+            logger.error('Error fetching extensions:', extensionsError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch extensions'
+            });
+        }
+
+        // Transform the data to match expected format
+        const transformedExtensions = extensions.map(extension => ({
+            id: extension.id,
+            extensionNumber: extension.extension_number,
+            name: extension.name,
+            description: extension.description,
+            dialPlan: extension.dial_plan,
+            status: extension.status,
+            createdAt: extension.created_at,
+            updatedAt: extension.updated_at,
+            departmentId: extension.departments ? extension.departments.id : null,
+            departmentName: extension.departments ? extension.departments.name : null,
+            userId: extension.users ? extension.users.id : null,
+            userEmail: extension.users ? extension.users.email : null,
+            firstName: extension.users ? extension.users.first_name : null,
+            lastName: extension.users ? extension.users.last_name : null
+        }));
+
         const totalPages = Math.ceil(total / limit);
 
         res.json({
             success: true,
             data: {
-                extensions: extensionsResult.rows,
+                extensions: transformedExtensions,
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
@@ -95,19 +120,35 @@ router.get('/:id', requirePermission('extensions:read'), async (req, res) => {
     try {
         const { id } = req.params;
 
-        const extensionResult = await query(`
-      SELECT 
-        e.id, e.extension_number, e.name, e.description, e.dial_plan, e.status,
-        e.created_at, e.updated_at,
-        d.id as department_id, d.name as department_name,
-        u.id as user_id, u.email as user_email, u.first_name, u.last_name
-      FROM extensions e
-      LEFT JOIN departments d ON e.department_id = d.id
-      LEFT JOIN users u ON e.user_id = u.id
-      WHERE e.id = $1 AND e.tenant_id = $2
-    `, [id, req.user.tenantId]);
+        const { data: extension, error: extensionError } = await supabase
+            .from('extensions')
+            .select(`
+                id, extension_number, name, description, dial_plan, status,
+                created_at, updated_at,
+                departments!left(id, name),
+                users!left(id, email, first_name, last_name)
+            `)
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (extensionResult.rows.length === 0) {
+        if (extensionError) {
+            if (extensionError.code === 'PGRST116') { // Record not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Extension not found',
+                    message: 'The requested extension does not exist'
+                });
+            }
+            logger.error('Error fetching extension by ID:', extensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch extension by ID'
+            });
+        }
+
+        if (!extension) {
             return res.status(404).json({
                 success: false,
                 error: 'Extension not found',
@@ -118,7 +159,22 @@ router.get('/:id', requirePermission('extensions:read'), async (req, res) => {
         res.json({
             success: true,
             data: {
-                extension: extensionResult.rows[0]
+                extension: {
+                    id: extension.id,
+                    extensionNumber: extension.extension_number,
+                    name: extension.name,
+                    description: extension.description,
+                    dialPlan: extension.dial_plan,
+                    status: extension.status,
+                    createdAt: extension.created_at,
+                    updatedAt: extension.updated_at,
+                    departmentId: extension.departments ? extension.departments.id : null,
+                    departmentName: extension.departments ? extension.departments.name : null,
+                    userId: extension.users ? extension.users.id : null,
+                    userEmail: extension.users ? extension.users.email : null,
+                    firstName: extension.users ? extension.users.first_name : null,
+                    lastName: extension.users ? extension.users.last_name : null
+                }
             }
         });
 
@@ -155,12 +211,23 @@ router.post('/', [
         const { extensionNumber, name, description, userId, departmentId, dialPlan, status = 'active' } = req.body;
 
         // Check if extension number already exists in the same tenant
-        const existingExtension = await query(
-            'SELECT id FROM extensions WHERE extension_number = $1 AND tenant_id = $2',
-            [extensionNumber, req.user.tenantId]
-        );
+        const { data: existingExtension, error: existingExtensionError } = await supabase
+            .from('extensions')
+            .select('id')
+            .eq('extension_number', extensionNumber)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingExtension.rows.length > 0) {
+        if (existingExtensionError) {
+            logger.error('Error checking for existing extension:', existingExtensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing extension'
+            });
+        }
+
+        if (existingExtension) {
             return res.status(409).json({
                 success: false,
                 error: 'Extension already exists',
@@ -186,13 +253,30 @@ router.post('/', [
         }
 
         // Create extension
-        const extensionResult = await query(`
-      INSERT INTO extensions (id, tenant_id, extension_number, name, description, user_id, department_id, dial_plan, status)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, extension_number, name, description, dial_plan, status, created_at
-    `, [req.user.tenantId, extensionNumber, name, description || null, userId || null, departmentId || null, JSON.stringify(dialPlan), status]);
+        const { data: newExtension, error: newExtensionError } = await supabase
+            .from('extensions')
+            .insert([{
+                id: supabase.helpers.createId(),
+                tenant_id: req.user.tenantId,
+                extension_number: extensionNumber,
+                name: name,
+                description: description || null,
+                user_id: userId || null,
+                department_id: departmentId || null,
+                dial_plan: JSON.stringify(dialPlan),
+                status: status
+            }])
+            .select()
+            .single();
 
-        const newExtension = extensionResult.rows[0];
+        if (newExtensionError) {
+            logger.error('Error creating extension:', newExtensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to create extension'
+            });
+        }
 
         res.status(201).json({
             success: true,
@@ -241,12 +325,30 @@ router.put('/:id', [
         const { name, description, userId, departmentId, dialPlan, status } = req.body;
 
         // Check if extension exists and belongs to tenant
-        const existingExtension = await query(
-            'SELECT id, extension_number FROM extensions WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingExtension, error: existingExtensionError } = await supabase
+            .from('extensions')
+            .select('id, extension_number')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingExtension.rows.length === 0) {
+        if (existingExtensionError) {
+            if (existingExtensionError.code === 'PGRST116') { // Record not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Extension not found',
+                    message: 'The requested extension does not exist'
+                });
+            }
+            logger.error('Error checking for existing extension:', existingExtensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing extension'
+            });
+        }
+
+        if (!existingExtension) {
             return res.status(404).json({
                 success: false,
                 error: 'Extension not found',
@@ -321,37 +423,80 @@ router.put('/:id', [
             paramCount++;
             updateParams.push(req.user.tenantId);
 
-            await query(`
-        UPDATE extensions 
-        SET ${updateFields.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount - 1} AND tenant_id = $${paramCount}
-      `, updateParams);
+            const { error: updateError } = await supabase
+                .from('extensions')
+                .update({
+                    [updateFields.join(', ')]: updateParams
+                })
+                .eq('id', id)
+                .eq('tenant_id', req.user.tenantId);
+
+            if (updateError) {
+                logger.error('Error updating extension:', updateError);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Server error',
+                    message: 'Failed to update extension'
+                });
+            }
         }
 
         // Get updated extension
-        const updatedExtensionResult = await query(`
-      SELECT 
-        e.id, e.extension_number, e.name, e.description, e.dial_plan, e.status,
-        e.created_at, e.updated_at,
-        d.id as department_id, d.name as department_name,
-        u.id as user_id, u.email as user_email, u.first_name, u.last_name
-      FROM extensions e
-      LEFT JOIN departments d ON e.department_id = d.id
-      LEFT JOIN users u ON e.user_id = u.id
-      WHERE e.id = $1 AND e.tenant_id = $2
-    `, [id, req.user.tenantId]);
+        const { data: updatedExtension, error: updatedExtensionError } = await supabase
+            .from('extensions')
+            .select(`
+                id, extension_number, name, description, dial_plan, status,
+                created_at, updated_at,
+                departments!left(id, name),
+                users!left(id, email, first_name, last_name)
+            `)
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
+
+        if (updatedExtensionError) {
+            logger.error('Error fetching updated extension:', updatedExtensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to fetch updated extension'
+            });
+        }
+
+        if (!updatedExtension) {
+            return res.status(404).json({
+                success: false,
+                error: 'Extension not found',
+                message: 'The requested extension does not exist'
+            });
+        }
 
         res.json({
             success: true,
             message: 'Extension updated successfully',
             data: {
-                extension: updatedExtensionResult.rows[0]
+                extension: {
+                    id: updatedExtension.id,
+                    extensionNumber: updatedExtension.extension_number,
+                    name: updatedExtension.name,
+                    description: updatedExtension.description,
+                    dialPlan: updatedExtension.dial_plan,
+                    status: updatedExtension.status,
+                    createdAt: updatedExtension.created_at,
+                    updatedAt: updatedExtension.updated_at,
+                    departmentId: updatedExtension.departments ? updatedExtension.departments.id : null,
+                    departmentName: updatedExtension.departments ? updatedExtension.departments.name : null,
+                    userId: updatedExtension.users ? updatedExtension.users.id : null,
+                    userEmail: updatedExtension.users ? updatedExtension.users.email : null,
+                    firstName: updatedExtension.users ? updatedExtension.users.first_name : null,
+                    lastName: updatedExtension.users ? updatedExtension.users.last_name : null
+                }
             }
         });
 
         logger.info('Extension updated successfully', {
             extensionId: id,
-            extensionNumber: existingExtension.rows[0].extension_number,
+            extensionNumber: existingExtension.extension_number,
             updatedBy: req.user.id
         });
 
@@ -373,12 +518,30 @@ router.delete('/:id', requirePermission('extensions:delete'), async (req, res) =
         const { id } = req.params;
 
         // Check if extension exists and belongs to tenant
-        const existingExtension = await query(
-            'SELECT id, extension_number FROM extensions WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { data: existingExtension, error: existingExtensionError } = await supabase
+            .from('extensions')
+            .select('id, extension_number')
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId)
+            .single();
 
-        if (existingExtension.rows.length === 0) {
+        if (existingExtensionError) {
+            if (existingExtensionError.code === 'PGRST116') { // Record not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Extension not found',
+                    message: 'The requested extension does not exist'
+                });
+            }
+            logger.error('Error checking for existing extension:', existingExtensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to check for existing extension'
+            });
+        }
+
+        if (!existingExtension) {
             return res.status(404).json({
                 success: false,
                 error: 'Extension not found',
@@ -387,10 +550,20 @@ router.delete('/:id', requirePermission('extensions:delete'), async (req, res) =
         }
 
         // Delete extension
-        await query(
-            'DELETE FROM extensions WHERE id = $1 AND tenant_id = $2',
-            [id, req.user.tenantId]
-        );
+        const { error: deleteError } = await supabase
+            .from('extensions')
+            .delete()
+            .eq('id', id)
+            .eq('tenant_id', req.user.tenantId);
+
+        if (deleteError) {
+            logger.error('Error deleting extension:', deleteError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to delete extension'
+            });
+        }
 
         res.json({
             success: true,
@@ -399,7 +572,7 @@ router.delete('/:id', requirePermission('extensions:delete'), async (req, res) =
 
         logger.info('Extension deleted successfully', {
             extensionId: id,
-            extensionNumber: existingExtension.rows[0].extension_number,
+            extensionNumber: existingExtension.extension_number,
             deletedBy: req.user.id
         });
 
@@ -420,18 +593,35 @@ router.get('/search/:number', requirePermission('extensions:read'), async (req, 
     try {
         const { number } = req.params;
 
-        const extensionResult = await query(`
-      SELECT 
-        e.id, e.extension_number, e.name, e.description, e.dial_plan, e.status,
-        d.id as department_id, d.name as department_name,
-        u.id as user_id, u.email as user_email, u.first_name, u.last_name
-      FROM extensions e
-      LEFT JOIN departments d ON e.department_id = d.id
-      LEFT JOIN users u ON e.user_id = u.id
-      WHERE e.extension_number = $1 AND e.tenant_id = $2 AND e.status = 'active'
-    `, [number, req.user.tenantId]);
+        const { data: extension, error: extensionError } = await supabase
+            .from('extensions')
+            .select(`
+                id, extension_number, name, description, dial_plan, status,
+                departments!left(id, name),
+                users!left(id, email, first_name, last_name)
+            `)
+            .eq('extension_number', number)
+            .eq('tenant_id', req.user.tenantId)
+            .eq('status', 'active')
+            .single();
 
-        if (extensionResult.rows.length === 0) {
+        if (extensionError) {
+            if (extensionError.code === 'PGRST116') { // Record not found
+                return res.status(404).json({
+                    success: false,
+                    error: 'Extension not found',
+                    message: 'Extension not found or inactive'
+                });
+            }
+            logger.error('Error searching extension by number:', extensionError);
+            return res.status(500).json({
+                success: false,
+                error: 'Server error',
+                message: 'Failed to search extension by number'
+            });
+        }
+
+        if (!extension) {
             return res.status(404).json({
                 success: false,
                 error: 'Extension not found',
@@ -442,7 +632,20 @@ router.get('/search/:number', requirePermission('extensions:read'), async (req, 
         res.json({
             success: true,
             data: {
-                extension: extensionResult.rows[0]
+                extension: {
+                    id: extension.id,
+                    extensionNumber: extension.extension_number,
+                    name: extension.name,
+                    description: extension.description,
+                    dialPlan: extension.dial_plan,
+                    status: extension.status,
+                    departmentId: extension.departments ? extension.departments.id : null,
+                    departmentName: extension.departments ? extension.departments.name : null,
+                    userId: extension.users ? extension.users.id : null,
+                    userEmail: extension.users ? extension.users.email : null,
+                    firstName: extension.users ? extension.users.first_name : null,
+                    lastName: extension.users ? extension.users.last_name : null
+                }
             }
         });
 
