@@ -3,7 +3,218 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Add Client - Supabase API Test</title>
+  <title>Add Client - AI Receptionist</title>
+  <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Roboto', Arial, sans-serif;
+      background: linear-gradient(120deg, #f6d365 0%, #fda085 100%);
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.18);
+      padding: 40px 32px 32px 32px;
+      max-width: 420px;
+      width: 100%;
+      margin: 40px 0;
+      animation: fadeIn 0.8s;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(30px);}
+      to { opacity: 1; transform: translateY(0);}
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+    }
+    .logo span {
+      font-size: 2.5rem;
+      margin-right: 10px;
+    }
+    .logo-text {
+      font-weight: 700;
+      font-size: 1.5rem;
+      color: #4CAF50;
+      letter-spacing: 1px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 8px;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 24px;
+      font-size: 1.05rem;
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: #444;
+      font-weight: 500;
+      letter-spacing: 0.2px;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 1rem;
+      background: #fafbfc;
+      transition: border 0.2s;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border: 1.5px solid #4CAF50;
+      background: #fff;
+    }
+    button {
+      width: 100%;
+      background: linear-gradient(90deg, #4CAF50 60%, #43e97b 100%);
+      color: white;
+      border: none;
+      padding: 12px 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+      box-shadow: 0 2px 8px rgba(76,175,80,0.08);
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:hover {
+      background: linear-gradient(90deg, #43e97b 0%, #38f9d7 100%);
+      transform: translateY(-2px) scale(1.01);
+    }
+    .success-message, .error-message {
+      text-align: center;
+      margin-top: 18px;
+      padding: 10px 0;
+      border-radius: 5px;
+      font-size: 1rem;
+      font-weight: 500;
+      display: none;
+    }
+    .success-message {
+      background: #e6f9ed;
+      color: #219150;
+      border: 1px solid #b2e2c7;
+    }
+    .error-message {
+      background: #ffeaea;
+      color: #d32f2f;
+      border: 1px solid #f5bcbc;
+    }
+    @media (max-width: 600px) {
+      .container {
+        padding: 24px 8px 18px 8px;
+        max-width: 98vw;
+      }
+      h1 {
+        font-size: 1.3rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <span>🤖</span>
+      <span class="logo-text">AI Receptionist</span>
+    </div>
+    <h1>Add New Client</h1>
+    <div class="subtitle">Fill in the details below to add a new client to your system.</div>
+    <form id="clientForm" autocomplete="off">
+      <div class="form-group">
+        <label for="clientName">Client Name <span style="color:#d32f2f">*</span></label>
+        <input type="text" id="clientName" name="clientName" required placeholder="e.g. Acme Corp">
+      </div>
+      <div class="form-group">
+        <label for="contactPerson">Contact Person</label>
+        <input type="text" id="contactPerson" name="contactPerson" placeholder="e.g. John Doe">
+      </div>
+      <div class="form-group">
+        <label for="email">Contact Email <span style="color:#d32f2f">*</span></label>
+        <input type="email" id="email" name="email" required placeholder="e.g. john@acme.com">
+      </div>
+      <div class="form-group">
+        <label for="phone">Contact Phone</label>
+        <input type="tel" id="phone" name="phone" placeholder="e.g. +1234567890">
+      </div>
+      <div class="form-group">
+        <label for="industry">Industry</label>
+        <select id="industry" name="industry">
+          <option value="">Select industry</option>
+          <option value="Technology">Technology</option>
+          <option value="Healthcare">Healthcare</option>
+          <option value="Finance">Finance</option>
+          <option value="Retail">Retail</option>
+          <option value="Education">Education</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <button type="submit">Add Client</button>
+      <div class="success-message" id="successMsg">Client added successfully!</div>
+      <div class="error-message" id="errorMsg">Something went wrong. Please try again.</div>
+    </form>
+  </div>
+  <script>
+    // Simple form validation and fake submit
+    const form = document.getElementById('clientForm');
+    const successMsg = document.getElementById('successMsg');
+    const errorMsg = document.getElementById('errorMsg');
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      successMsg.style.display = 'none';
+      errorMsg.style.display = 'none';
+
+      // Basic validation
+      const clientName = form.clientName.value.trim();
+      const email = form.email.value.trim();
+
+      if (!clientName || !email) {
+        errorMsg.textContent = "Please fill in all required fields.";
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      // Simulate API call (replace with real API call)
+      try {
+        // Example: await fetch('/api/clients', { ... })
+        await new Promise(res => setTimeout(res, 900));
+        successMsg.style.display = 'block';
+        form.reset();
+      } catch (err) {
+        errorMsg.textContent = "Failed to add client. Please try again.";
+        errorMsg.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
+<!-- <html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Client - AI Receptionist</title>
+  <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -171,4 +382,4 @@
     });
   </script>
 </body>
-</html>
+</html> -->

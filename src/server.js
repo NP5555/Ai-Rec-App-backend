@@ -19,6 +19,7 @@ const roleRoutes = require('./routes/roles');
 const tenantRoutes = require('./routes/tenants');
 const ivrRoutes = require('./routes/ivr');
 const extensionRoutes = require('./routes/extensions');
+const signalwireRoutes = require('./routes/signalwire');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,7 +58,56 @@ app.use((req, res, next) => {
     next();
 });
 
-// Health check endpoint
+/**
+ * @swagger
+ * /favicon.ico:
+ *   get:
+ *     summary: Get favicon
+ *     description: Returns the application favicon
+ *     responses:
+ *       200:
+ *         description: Favicon returned successfully
+ *         content:
+ *           image/svg+xml:
+ *             schema:
+ *               type: string
+ */
+app.get('/favicon.ico', (req, res) => {
+    const svgFavicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🤖</text></svg>`;
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.send(svgFavicon);
+});
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check
+ *     description: Check the health status of the backend service
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: "OK"
+ *                 timestamp:
+ *                   type: string
+ *                   format: "date-time"
+ *                   example: "2024-01-01T00:00:00.000Z"
+ *                 uptime:
+ *                   type: number
+ *                   description: Service uptime in seconds
+ *                   example: 3600
+ *                 environment:
+ *                   type: string
+ *                   example: "development"
+ */
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'OK',
@@ -71,19 +121,113 @@ app.get('/health', (req, res) => {
 const swaggerDefinition = {
     openapi: '3.0.3',
     info: {
-        title: 'AI Receptionist API',
+        title: 'AI Receptionist Backend API',
         version: '1.0.0',
-        description: 'API documentation for AI Receptionist backend',
+        description: 'Complete API documentation for the AI Receptionist backend system. This API provides endpoints for managing clients, users, IVR systems, and SignalWire integrations.',
+        contact: {
+            name: 'AI Receptionist Team',
+            email: 'support@aireceptionist.com'
+        },
+        license: {
+            name: 'MIT',
+            url: 'https://opensource.org/licenses/MIT'
+        }
     },
     servers: [
-        { url: '/'}
+        { 
+            url: 'http://localhost:3000',
+            description: 'Development server'
+        },
+        { 
+            url: '/',
+            description: 'Production server'
+        }
+    ],
+    tags: [
+        {
+            name: 'System',
+            description: 'System health and status endpoints'
+        },
+        {
+            name: 'Database',
+            description: 'Database connection and testing endpoints'
+        },
+        {
+            name: 'Users',
+            description: 'User management operations'
+        },
+        {
+            name: 'Clients',
+            description: 'Client management operations'
+        },
+        {
+            name: 'Authentication',
+            description: 'User authentication and authorization'
+        },
+        {
+            name: 'IVR',
+            description: 'Interactive Voice Response system management'
+        },
+        {
+            name: 'SignalWire',
+            description: 'SignalWire communication integration'
+        },
+        {
+            name: 'Extensions',
+            description: 'Phone extension management'
+        },
+        {
+            name: 'Tenants',
+            description: 'Multi-tenant management'
+        },
+        {
+            name: 'Roles',
+            description: 'Role-based access control'
+        }
     ],
     components: {
         securitySchemes: {
             bearerAuth: {
                 type: 'http',
                 scheme: 'bearer',
-                bearerFormat: 'JWT'
+                bearerFormat: 'JWT',
+                description: 'JWT token for authentication'
+            }
+        },
+        schemas: {
+            Error: {
+                type: 'object',
+                properties: {
+                    success: {
+                        type: 'boolean',
+                        example: false
+                    },
+                    message: {
+                        type: 'string',
+                        example: 'Error message'
+                    },
+                    error: {
+                        type: 'string',
+                        example: 'Detailed error information'
+                    }
+                }
+            },
+            Success: {
+                type: 'object',
+                properties: {
+                    success: {
+                        type: 'boolean',
+                        example: true
+                    },
+                    message: {
+                        type: 'string',
+                        example: 'Operation successful'
+                    },
+                    data: {
+                        type: 'object',
+                        description: 'Response data'
+                    }
+                }
             }
         }
     },
@@ -92,17 +236,58 @@ const swaggerDefinition = {
 
 const swaggerOptions = {
     definition: swaggerDefinition,
-    apis: ['./src/routes/**/*.js', './src/server.js'],
+    apis: ['./src/routes/**/*.js', './src/server.js', './swagger-documentation.js'],
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Define your table name here
-const CLIENT_USERS_TABLE = 'client_users';
 const CLIENTS_TABLE = 'clients';
 
-// Test endpoint to verify Supabase connection
+/**
+ * @swagger
+ * /api/test-connection:
+ *   get:
+ *     summary: Test Supabase connection
+ *     description: Test the connection to the Supabase database
+ *     tags: [Database]
+ *     responses:
+ *       200:
+ *         description: Connection successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Successfully connected to Supabase"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: "connected"
+ *       500:
+ *         description: Connection failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to connect to Supabase"
+ *                 error:
+ *                   type: string
+ */
 app.get('/api/test-connection', async (req, res) => {
   try {
     // Check if we can connect to Supabase at all
@@ -127,32 +312,76 @@ app.get('/api/test-connection', async (req, res) => {
   }
 });
 
-// GET all users
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Get all users
+ *     description: Retrieve all users from the users table
+ *     tags: [Users]
+ *     responses:
+ *       200:
+ *         description: Users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: number
+ *                   description: Number of users returned
+ *                   example: 5
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       tenant_id:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                       first_name:
+ *                         type: string
+ *                       last_name:
+ *                         type: string
+ *                       phone:
+ *                         type: string
+ *                       status:
+ *                         type: string
+ *                       last_login:
+ *                         type: string
+ *                         format: "date-time"
+ *                       created_at:
+ *                         type: string
+ *                         format: "date-time"
+ *                       updated_at:
+ *                         type: string
+ *                         format: "date-time"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ */
 app.get('/api/users', async (req, res) => {
   try {
-    // Check if the table exists first
-    const { data: tableExists, error: tableError } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_name', CLIENT_USERS_TABLE)
-      .limit(1);
-    
-    if (tableError) {
-      throw tableError;
-    }
-    
-    if (!tableExists || tableExists.length === 0) {
-      return res.json({
-        success: true,
-        message: `Table ${CLIENT_USERS_TABLE} does not exist yet. Run migrations first.`,
-        count: 0,
-        data: []
-      });
-    }
-    
+    // Query the users table directly
     const { data, error } = await supabase
-      .from(CLIENT_USERS_TABLE)
-      .select('*');
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false });
     
     if (error) {
       throw error;
@@ -164,38 +393,95 @@ app.get('/api/users', async (req, res) => {
       data: data || []
     });
   } catch (error) {
-    logger.error('Error fetching data:', error);
+    logger.error('Error fetching users:', error);
     res.status(500).json({
       success: false,
       error: error.message
     });
   }
-});
+ });
 
-// GET user by ID
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   get:
+ *     summary: Get user by ID
+ *     description: Retrieve a specific user by their ID from the users table
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The user ID
+ *     responses:
+ *       200:
+ *         description: User retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     tenant_id:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     first_name:
+ *                       type: string
+ *                     last_name:
+ *                       type: string
+ *                     phone:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                     last_login:
+ *                       type: string
+ *                       format: "date-time"
+ *                     created_at:
+ *                       type: string
+ *                       format: "date-time"
+ *                     updated_at:
+ *                       type: string
+ *                       format: "date-time"
+ *       404:
+ *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ */
 app.get('/api/users/:id', async (req, res) => {
   try {
-    // Check if the table exists first
-    const { data: tableExists, error: tableError } = await supabase
-      .from('information_schema.tables')
-      .select('table_name')
-      .eq('table_name', CLIENT_USERS_TABLE)
-      .limit(1);
-    
-    if (tableError) {
-      throw tableError;
-    }
-    
-    if (!tableExists || tableExists.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `Table ${CLIENT_USERS_TABLE} does not exist yet. Run migrations first.`
-      });
-    }
-    
     const { id } = req.params;
     const { data, error } = await supabase
-      .from(CLIENT_USERS_TABLE)
+      .from('users')
       .select('*')
       .eq('id', id)
       .single();
@@ -222,9 +508,106 @@ app.get('/api/users/:id', async (req, res) => {
       error: error.message
     });
   }
-});
+ });
 
-// Endpoint to create a new client
+/**
+ * @swagger
+ * /api/clients:
+ *   post:
+ *     summary: Create a new client
+ *     description: Create a new client in the system
+ *     tags: [Clients]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - did_e164
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Client name
+ *                 example: "Acme Corporation"
+ *               did_e164:
+ *                 type: string
+ *                 description: Phone number in E164 format
+ *                 example: "+12345678900"
+ *               status:
+ *                 type: string
+ *                 enum: [active, inactive, pending]
+ *                 default: active
+ *                 example: "active"
+ *               after_hours_policy:
+ *                 type: string
+ *                 enum: [send_to_vm, follow_normal_flow, play_closed_message]
+ *                 default: send_to_vm
+ *                 example: "send_to_vm"
+ *               business_hours:
+ *                 type: object
+ *                 description: Business hours configuration
+ *                 example: {"monday":{"open":"09:00","close":"17:00"}}
+ *               timezone:
+ *                 type: string
+ *                 example: "America/New_York"
+ *               greeting:
+ *                 type: string
+ *                 example: "Welcome to our business!"
+ *     responses:
+ *       201:
+ *         description: Client created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Client created successfully"
+ *                 data:
+ *                   type: object
+ *       400:
+ *         description: Bad request - missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *       409:
+ *         description: Conflict - client already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ */
 app.post('/api/clients', async (req, res) => {
   try {
     // Validate request body
@@ -283,11 +666,115 @@ app.post('/api/clients', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
-    });
+      });
   }
-});
+ });
 
-// Specialized endpoint for adding a client user with proper validation
+/**
+ * @swagger
+ * /api/client-users:
+ *   post:
+ *     summary: Create a new client user
+ *     description: Create a new client user in the system
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - client_id
+ *             properties:
+ *               client_id:
+ *                 type: string
+ *                 description: ID of the client this user belongs to
+ *                 example: "client-123"
+ *               first_name:
+ *                 type: string
+ *                 description: User's first name
+ *                 example: "John"
+ *               last_name:
+ *                 type: string
+ *                 description: User's last name
+ *                 example: "Doe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User's email address
+ *                 example: "john.doe@example.com"
+ *               phone:
+ *                 type: string
+ *                 description: User's phone number
+ *                 example: "+12345678900"
+ *               app_role_id:
+ *                 type: string
+ *                 description: User's application role ID
+ *                 example: "role-456"
+ *               departments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: List of departments the user belongs to
+ *                 example: ["sales", "support"]
+ *               is_active:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Whether the user is active
+ *                 example: true
+ *     responses:
+ *       201:
+ *         description: Client user created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Client user created successfully"
+ *                 data:
+ *                   type: object
+ *       400:
+ *         description: Bad request - missing required fields or validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *       409:
+ *         description: Conflict - user already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ */
 app.post('/api/client-users', async (req, res) => {
   try {
     // Validate request body
@@ -340,7 +827,7 @@ app.post('/api/client-users', async (req, res) => {
 
     // Insert the client user
     const { data, error } = await supabase
-      .from(CLIENT_USERS_TABLE)
+      .from('client_users')
       .insert(userData)
       .select();
     
@@ -376,7 +863,7 @@ app.post('/api/client-users', async (req, res) => {
       error: error.message
     });
   }
-});
+ });
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -385,6 +872,7 @@ app.use('/api/roles', roleRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/mcp/ivr', ivrRoutes);
 app.use('/api/extensions', extensionRoutes);
+app.use('/api/signalwire', signalwireRoutes);
 
 // Serve HTML forms
 app.get('/', (req, res) => {

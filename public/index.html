@@ -3,198 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Supabase API Test</title>
+  <title>_Ai Receptionist Backend</title>
+  <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       max-width: 800px;
       margin: 0 auto;
-      padding: 20px;
+      padding: 40px 20px;
       line-height: 1.6;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      min-height: 100vh;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
     }
     h1 {
-      color: #333;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 10px;
-    }
-    .card {
-      background-color: #f9f9f9;
-      border-radius: 5px;
-      padding: 15px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    button {
-      background-color: #4CAF50;
       color: white;
-      border: none;
-      padding: 10px 15px;
       text-align: center;
-      text-decoration: none;
-      display: inline-block;
-      font-size: 16px;
-      margin: 4px 2px;
-      cursor: pointer;
-      border-radius: 4px;
+      margin-bottom: 30px;
+      font-size: 2.5em;
+      font-weight: 300;
     }
-    button:hover {
-      background-color: #45a049;
+    .subtitle {
+      text-align: center;
+      font-size: 1.2em;
+      margin-bottom: 40px;
+      opacity: 0.9;
     }
-    pre {
-      background-color: #f5f5f5;
-      padding: 10px;
-      border-radius: 5px;
-      overflow-x: auto;
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 40px;
     }
-    .form-group {
-      margin-bottom: 15px;
+    .feature {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
     }
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: bold;
-    }
-    input, textarea {
-      width: 100%;
-      padding: 8px;
-      box-sizing: border-box;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+    .feature h3 {
+      margin-top: 0;
+      color: #ffd700;
     }
     .nav {
-      margin-bottom: 20px;
+      text-align: center;
+      margin-top: 30px;
     }
     .nav a {
-      margin-right: 15px;
+      display: inline-block;
+      margin: 0 15px;
+      padding: 12px 24px;
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
       text-decoration: none;
-      color: #0066cc;
+      border-radius: 25px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      transition: all 0.3s ease;
+    }
+    .nav a:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    }
+    .status {
+      text-align: center;
+      margin-top: 30px;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .status-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #4CAF50;
+      margin-right: 10px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
     }
   </style>
 </head>
 <body>
-  <h1>Supabase API Test</h1>
-  
-  <div class="nav">
-    <a href="/">Home</a>
-    <a href="/client">Add Client</a>
+  <div class="container">
+    <h1>Receptionist Backend</h1>
+    <p class="subtitle">AI Receptionist & Communication Management System</p>
+    
+    <div class="features">
+      <div class="feature">
+        <h3>🔐 Authentication</h3>
+        <p>Secure user authentication and role-based access control</p>
+      </div>
+      <div class="feature">
+        <h3>📞 IVR Management</h3>
+        <p>Interactive Voice Response system configuration and management</p>
+      </div>
+      <div class="feature">
+        <h3>🏢 Tenant Management</h3>
+        <p>Multi-tenant architecture for client isolation</p>
+      </div>
+      <div class="feature">
+        <h3>📱 SignalWire Integration</h3>
+        <p>Advanced communication features powered by SignalWire</p>
+      </div>
+    </div>
+    
+    <div class="status">
+      <span class="status-indicator"></span>
+      <strong>Backend Status:</strong> Running
+    </div>
+    
+    <div class="nav">
+      <a href="/api-docs" target="_blank">📚 API Documentation</a>
+      <a href="/client">👥 Client Management</a>
+      <a href="/health">💚 Health Check</a>
+    </div>
   </div>
-
-  <div class="card">
-    <h2>Test Connection</h2>
-    <button id="testConnection">Test Supabase Connection</button>
-    <div id="connectionResult"></div>
-  </div>
-
-  <div class="card">
-    <h2>Get All Users</h2>
-    <button id="getUsers">Get Users</button>
-    <div id="usersResult"></div>
-  </div>
-
-  <div class="card">
-    <h2>Add New User</h2>
-    <form id="addUserForm">
-      <div class="form-group">
-        <label for="clientId">Client ID:</label>
-        <input type="text" id="clientId" name="client_id" required>
-      </div>
-      <div class="form-group">
-        <label for="firstName">First Name:</label>
-        <input type="text" id="firstName" name="first_name">
-      </div>
-      <div class="form-group">
-        <label for="lastName">Last Name:</label>
-        <input type="text" id="lastName" name="last_name">
-      </div>
-      <div class="form-group">
-        <label for="email">Email:</label>
-        <input type="email" id="email" name="email">
-      </div>
-      <div class="form-group">
-        <label for="phone">Phone:</label>
-        <input type="text" id="phone" name="phone">
-      </div>
-      <div class="form-group">
-        <label for="appRoleId">App Role ID:</label>
-        <input type="text" id="appRoleId" name="app_role_id">
-      </div>
-      <button type="submit">Add User</button>
-    </form>
-    <div id="addUserResult"></div>
-  </div>
-
-  <script>
-    // Test connection
-    document.getElementById('testConnection').addEventListener('click', async () => {
-      const resultDiv = document.getElementById('connectionResult');
-      resultDiv.innerHTML = '<p>Testing connection...</p>';
-      
-      try {
-        const response = await fetch('/api/test-connection');
-        const data = await response.json();
-        
-        resultDiv.innerHTML = `
-          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
-          <p>Message: ${data.message}</p>
-          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
-        `;
-      } catch (error) {
-        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
-      }
-    });
-
-    // Get users
-    document.getElementById('getUsers').addEventListener('click', async () => {
-      const resultDiv = document.getElementById('usersResult');
-      resultDiv.innerHTML = '<p>Loading users...</p>';
-      
-      try {
-        const response = await fetch('/api/users');
-        const data = await response.json();
-        
-        resultDiv.innerHTML = `
-          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
-          <p>Count: ${data.count || 0}</p>
-          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
-        `;
-      } catch (error) {
-        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
-      }
-    });
-
-    // Add user
-    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const resultDiv = document.getElementById('addUserResult');
-      resultDiv.innerHTML = '<p>Adding user...</p>';
-      
-      const formData = new FormData(e.target);
-      const userData = {};
-      
-      formData.forEach((value, key) => {
-        if (value) userData[key] = value;
-      });
-      
-      try {
-        const response = await fetch('/api/client-users', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(userData)
-        });
-        
-        const data = await response.json();
-        
-        resultDiv.innerHTML = `
-          <p>Status: ${data.success ? 'Success' : 'Failed'}</p>
-          <p>Message: ${data.message || ''}</p>
-          <pre>${JSON.stringify(data.data || data.error, null, 2)}</pre>
-        `;
-      } catch (error) {
-        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
-      }
-    });
-  </script>
 </body>
 </html>

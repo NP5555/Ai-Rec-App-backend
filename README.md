@@ -146,6 +146,20 @@ npm start
 | POST | `/api/mcp/ivr/event` | Handle IVR events | Public |
 | POST | `/api/mcp/ivr/log` | Log call completion | Public |
 
+### SignalWire Integration
+
+| Method | Endpoint | Description | Access |
+|--------|----------|-------------|---------|
+| POST | `/api/signalwire/call/outbound` | Create outbound call | Private (calls:create) |
+| POST | `/api/signalwire/sms/send` | Send SMS message | Private (sms:create) |
+| GET | `/api/signalwire/phone-numbers` | Get phone numbers | Private (phone_numbers:read) |
+| POST | `/api/signalwire/phone-numbers` | Create phone number | Private (phone_numbers:create) |
+| GET | `/api/signalwire/analytics` | Get call analytics | Private (analytics:read) |
+| GET | `/api/signalwire/call/:callSid` | Get call details | Private (calls:read) |
+| GET | `/api/signalwire/recordings/:callSid` | Get call recordings | Private (recordings:read) |
+| GET | `/api/signalwire/health` | Service health check | Private (system:read) |
+| POST | `/api/signalwire/webhook/sms` | SMS webhook handler | Public |
+
 ## SignalWire IVR Integration
 
 ### Call Flow
@@ -155,6 +169,40 @@ npm start
 3. **IVR Response** → Return action and parameters
 4. **Event Processing** → POST `/api/mcp/ivr/event` for each event
 5. **Call Completion** → POST `/api/mcp/ivr/log` with CDR data
+
+## SignalWire Full Integration
+
+### Features
+
+- **Voice Calls**: Inbound and outbound call handling
+- **SMS Messaging**: Send and receive SMS messages
+- **Phone Number Management**: Purchase and configure phone numbers
+- **Call Analytics**: Detailed call statistics and reporting
+- **Call Recordings**: Access to call recordings
+- **Webhook Handling**: Real-time event processing
+- **Multi-tenant Support**: Isolated phone numbers per tenant
+
+### Outbound Call Flow
+
+1. **API Request** → POST `/api/signalwire/call/outbound`
+2. **Call Creation** → SignalWire initiates call
+3. **Status Updates** → Webhook callbacks for call progress
+4. **Call Completion** → Final status and analytics
+
+### SMS Flow
+
+1. **Send SMS** → POST `/api/signalwire/sms/send`
+2. **Message Delivery** → SignalWire delivers message
+3. **Delivery Status** → Webhook updates on delivery
+4. **Inbound SMS** → Webhook receives incoming messages
+
+### Phone Number Management
+
+- Purchase new phone numbers
+- Configure webhook URLs
+- Set friendly names
+- Associate with tenants
+- Monitor usage and analytics
 
 ### Supported Actions
 

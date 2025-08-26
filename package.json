@@ -19,6 +19,8 @@
   "author": "AI Receptionist Team",
   "license": "MIT",
   "dependencies": {
+    "@signalwire/compatibility-api": "^3.1.4",
+    "@signalwire/node": "^3.0.3",
     "@supabase/supabase-js": "^2.55.0",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
