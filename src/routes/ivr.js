@@ -5,9 +5,63 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// @route   POST /api/mcp/ivr/entry
-// @desc    Handle inbound call entry from SignalWire
-// @access  Public (SignalWire webhook)
+/**
+ * @swagger
+ * /api/mcp/ivr/entry:
+ *   post:
+ *     summary: Handle inbound call entry from SignalWire
+ *     description: Process inbound calls and return IVR flow configuration
+ *     tags: [IVR]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/IVREntry'
+ *           example:
+ *             tenantId: "tenant-123"
+ *             did: "+12345678900"
+ *             from: "+19876543210"
+ *             to: "+12345678900"
+ *             ts: "2024-01-01T12:00:00Z"
+ *     responses:
+ *       200:
+ *         description: IVR flow configuration returned
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/IVRResponse'
+ *             example:
+ *               success: true
+ *               callId: "tenant-123_1234567890_abc123"
+ *               action: "gather"
+ *               params:
+ *                 greeting: "Welcome. Please press 1 for Sales, 2 for Support, 3 for Billing, or dial an extension."
+ *                 timeout: 10
+ *                 max_digits: 4
+ *                 retries: 3
+ *                 options:
+ *                   "1":
+ *                     action: "dept"
+ *                     params:
+ *                       department: "Sales"
+ *                   "2":
+ *                     action: "dept"
+ *                     params:
+ *                       department: "Support"
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/entry', [
     body('tenantId').notEmpty().withMessage('tenantId is required'),
     body('did').notEmpty().withMessage('did is required'),

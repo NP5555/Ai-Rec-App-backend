@@ -9,9 +9,92 @@ const router = express.Router();
 // Apply authentication to all routes
 router.use(authenticateToken);
 
-// @route   GET /api/roles
-// @desc    Get all roles for tenant
-// @access  Private (requires roles:read permission)
+/**
+ * @swagger
+ * /api/roles:
+ *   get:
+ *     summary: Get all roles for tenant
+ *     description: Retrieve a paginated list of roles for the current tenant
+ *     tags: [Roles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of roles per page
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for role name or description
+ *       - in: query
+ *         name: isSystemRole
+ *         schema:
+ *           type: boolean
+ *         description: Filter by system role status
+ *     responses:
+ *       200:
+ *         description: Roles retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     roles:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Role'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/Pagination'
+ *             example:
+ *               success: true
+ *               data:
+ *                 roles:
+ *                   - id: "role-123"
+ *                     name: "Admin"
+ *                     description: "Administrator role with full access"
+ *                     permissions: ["users:read", "users:write", "roles:read"]
+ *                     isSystemRole: false
+ *                     userCount: 5
+ *                 pagination:
+ *                   page: 1
+ *                   limit: 10
+ *                   total: 8
+ *                   totalPages: 1
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/', requirePermission('roles:read'), async (req, res) => {
     try {
         const { page = 1, limit = 10, search, isSystemRole } = req.query;

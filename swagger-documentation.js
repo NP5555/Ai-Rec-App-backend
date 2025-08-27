@@ -97,10 +97,6 @@ All API responses follow a consistent format:
         {
             name: 'SignalWire',
             description: 'SignalWire communication integration'
-        },
-        {
-            name: 'Clients',
-            description: 'Client management operations'
         }
     ],
     components: {
@@ -108,8 +104,7 @@ All API responses follow a consistent format:
             bearerAuth: {
                 type: 'http',
                 scheme: 'bearer',
-                bearerFormat: 'JWT',
-                description: 'JWT token for authentication. Include in Authorization header as: Bearer <token>'
+                bearerFormat: 'JWT'
             }
         },
         schemas: {
@@ -117,18 +112,9 @@ All API responses follow a consistent format:
             Error: {
                 type: 'object',
                 properties: {
-                    success: {
-                        type: 'boolean',
-                        example: false
-                    },
-                    message: {
-                        type: 'string',
-                        example: 'Error message'
-                    },
-                    error: {
-                        type: 'string',
-                        example: 'Detailed error information'
-                    },
+                    success: { type: 'boolean', example: false },
+                    message: { type: 'string', example: 'Error message' },
+                    error: { type: 'string', example: 'Detailed error information' },
                     details: {
                         type: 'array',
                         items: {
@@ -144,18 +130,9 @@ All API responses follow a consistent format:
             Success: {
                 type: 'object',
                 properties: {
-                    success: {
-                        type: 'boolean',
-                        example: true
-                    },
-                    message: {
-                        type: 'string',
-                        example: 'Operation successful'
-                    },
-                    data: {
-                        type: 'object',
-                        description: 'Response data'
-                    }
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: 'Operation successful' },
+                    data: { type: 'object', description: 'Response data' }
                 }
             },
             Pagination: {
@@ -172,19 +149,15 @@ All API responses follow a consistent format:
             User: {
                 type: 'object',
                 properties: {
-                    id: { type: 'string', example: 'user-123' },
+                    id: { type: 'string', format: 'uuid', example: 'user-123' },
                     email: { type: 'string', format: 'email', example: 'john.doe@example.com' },
                     firstName: { type: 'string', example: 'John' },
                     lastName: { type: 'string', example: 'Doe' },
                     phone: { type: 'string', example: '+12345678900' },
-                    status: { type: 'string', enum: ['active', 'inactive', 'pending'], example: 'active' },
-                    lastLogin: { type: 'string', format: 'date-time' },
+                    status: { type: 'string', enum: ['active', 'inactive', 'suspended'], example: 'active' },
+                    tenantId: { type: 'string', format: 'uuid', example: 'tenant-123' },
                     createdAt: { type: 'string', format: 'date-time' },
-                    updatedAt: { type: 'string', format: 'date-time' },
-                    roles: {
-                        type: 'array',
-                        items: { $ref: '#/components/schemas/Role' }
-                    }
+                    updatedAt: { type: 'string', format: 'date-time' }
                 }
             },
             UserCreate: {
@@ -197,12 +170,7 @@ All API responses follow a consistent format:
                     lastName: { type: 'string', example: 'Doe' },
                     phone: { type: 'string', example: '+12345678900' },
                     tenantId: { type: 'string', example: 'tenant-123' },
-                    appRoleId: { type: 'string', example: 'role-456' },
-                    departments: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        example: ['sales', 'support']
-                    }
+                    appRoleId: { type: 'string', example: 'role-456' }
                 }
             },
             UserUpdate: {
@@ -211,12 +179,8 @@ All API responses follow a consistent format:
                     firstName: { type: 'string', example: 'John' },
                     lastName: { type: 'string', example: 'Doe' },
                     phone: { type: 'string', example: '+12345678900' },
-                    status: { type: 'string', enum: ['active', 'inactive', 'pending'] },
-                    appRoleId: { type: 'string', example: 'role-456' },
-                    departments: {
-                        type: 'array',
-                        items: { type: 'string' }
-                    }
+                    status: { type: 'string', enum: ['active', 'inactive', 'suspended'] },
+                    appRoleId: { type: 'string', example: 'role-456' }
                 }
             },
             
@@ -224,7 +188,7 @@ All API responses follow a consistent format:
             Role: {
                 type: 'object',
                 properties: {
-                    id: { type: 'string', example: 'role-123' },
+                    id: { type: 'string', format: 'uuid', example: 'role-123' },
                     name: { type: 'string', example: 'Admin' },
                     description: { type: 'string', example: 'Administrator role with full access' },
                     permissions: {
@@ -232,10 +196,8 @@ All API responses follow a consistent format:
                         items: { type: 'string' },
                         example: ['users:read', 'users:write', 'roles:read']
                     },
-                    isSystemRole: { type: 'boolean', example: false },
-                    createdAt: { type: 'string', format: 'date-time' },
-                    updatedAt: { type: 'string', format: 'date-time' },
-                    userCount: { type: 'integer', example: 5 }
+                    tenantId: { type: 'string', format: 'uuid', example: 'tenant-123' },
+                    createdAt: { type: 'string', format: 'date-time' }
                 }
             },
             RoleCreate: {
@@ -256,15 +218,11 @@ All API responses follow a consistent format:
             Tenant: {
                 type: 'object',
                 properties: {
-                    id: { type: 'string', example: 'tenant-123' },
+                    id: { type: 'string', format: 'uuid', example: 'tenant-123' },
                     name: { type: 'string', example: 'Acme Corporation' },
                     domain: { type: 'string', example: 'acme.com' },
-                    status: { type: 'string', enum: ['active', 'inactive', 'pending'], example: 'active' },
-                    settings: { type: 'object' },
-                    createdAt: { type: 'string', format: 'date-time' },
-                    updatedAt: { type: 'string', format: 'date-time' },
-                    userCount: { type: 'integer', example: 25 },
-                    extensionCount: { type: 'integer', example: 10 }
+                    status: { type: 'string', enum: ['active', 'inactive'], example: 'active' },
+                    createdAt: { type: 'string', format: 'date-time' }
                 }
             },
             TenantCreate: {
@@ -273,7 +231,7 @@ All API responses follow a consistent format:
                 properties: {
                     name: { type: 'string', example: 'Acme Corporation' },
                     domain: { type: 'string', example: 'acme.com' },
-                    status: { type: 'string', enum: ['active', 'inactive', 'pending'], default: 'active' }
+                    status: { type: 'string', enum: ['active', 'inactive'], default: 'active' }
                 }
             },
             
@@ -281,20 +239,14 @@ All API responses follow a consistent format:
             Extension: {
                 type: 'object',
                 properties: {
-                    id: { type: 'string', example: 'ext-123' },
+                    id: { type: 'string', format: 'uuid', example: 'ext-123' },
                     extensionNumber: { type: 'string', example: '1001' },
                     name: { type: 'string', example: 'Sales Department' },
                     description: { type: 'string', example: 'Main sales extension' },
-                    dialPlan: { type: 'string', example: 'sip:1001@pbx.example.com' },
-                    status: { type: 'string', enum: ['active', 'inactive'], example: 'active' },
-                    createdAt: { type: 'string', format: 'date-time' },
-                    updatedAt: { type: 'string', format: 'date-time' },
-                    departmentId: { type: 'string', example: 'dept-123' },
-                    departmentName: { type: 'string', example: 'Sales' },
-                    userId: { type: 'string', example: 'user-123' },
-                    userEmail: { type: 'string', example: 'sales@example.com' },
-                    firstName: { type: 'string', example: 'John' },
-                    lastName: { type: 'string', example: 'Doe' }
+                    type: { type: 'string', enum: ['user', 'department', 'ivr'], example: 'department' },
+                    userId: { type: 'string', format: 'uuid', example: 'user-123' },
+                    tenantId: { type: 'string', format: 'uuid', example: 'tenant-123' },
+                    createdAt: { type: 'string', format: 'date-time' }
                 }
             },
             ExtensionCreate: {
@@ -304,9 +256,7 @@ All API responses follow a consistent format:
                     extensionNumber: { type: 'string', example: '1001' },
                     name: { type: 'string', example: 'Sales Department' },
                     description: { type: 'string', example: 'Main sales extension' },
-                    dialPlan: { type: 'string', example: 'sip:1001@pbx.example.com' },
-                    status: { type: 'string', enum: ['active', 'inactive'], default: 'active' },
-                    departmentId: { type: 'string', example: 'dept-123' },
+                    type: { type: 'string', enum: ['user', 'department', 'ivr'], default: 'department' },
                     userId: { type: 'string', example: 'user-123' }
                 }
             },
@@ -344,51 +294,35 @@ All API responses follow a consistent format:
                     options: { type: 'object' }
                 }
             },
-            CallSession: {
+            SMSMessage: {
                 type: 'object',
+                required: ['from', 'to', 'body', 'tenantId'],
                 properties: {
-                    id: { type: 'string', example: 'session-123' },
-                    tenantId: { type: 'string', example: 'tenant-123' },
-                    callId: { type: 'string', example: 'call-123' },
-                    fromNumber: { type: 'string', example: '+12345678900' },
-                    toNumber: { type: 'string', example: '+19876543210' },
-                    direction: { type: 'string', enum: ['inbound', 'outbound'], example: 'outbound' },
-                    status: { type: 'string', enum: ['initiating', 'active', 'completed', 'failed'], example: 'active' },
-                    startedAt: { type: 'string', format: 'date-time' },
-                    endedAt: { type: 'string', format: 'date-time' }
+                    from: { type: 'string', example: '+12345678900' },
+                    to: { type: 'string', example: '+19876543210' },
+                    body: { type: 'string', example: 'Hello from AI Receptionist!' },
+                    tenantId: { type: 'string', example: 'tenant-123' }
                 }
             },
-            
-            // Client Schemas
-            Client: {
+            PhoneNumber: {
                 type: 'object',
-                required: ['name', 'did_e164'],
                 properties: {
-                    name: { type: 'string', example: 'Acme Corporation' },
-                    did_e164: { type: 'string', example: '+12345678900' },
-                    status: { type: 'string', enum: ['active', 'inactive', 'pending'], default: 'active' },
-                    after_hours_policy: { type: 'string', enum: ['send_to_vm', 'follow_normal_flow', 'play_closed_message'], default: 'send_to_vm' },
-                    business_hours: { type: 'object' },
-                    timezone: { type: 'string', example: 'America/New_York' },
-                    greeting: { type: 'string', example: 'Welcome to our business!' }
+                    id: { type: 'string', format: 'uuid', example: 'phone-123' },
+                    phoneNumber: { type: 'string', example: '+12345678900' },
+                    friendlyName: { type: 'string', example: 'Main Office' },
+                    signalwireSid: { type: 'string', example: 'PN1234567890abcdef' },
+                    status: { type: 'string', enum: ['active', 'inactive', 'pending'], example: 'active' },
+                    tenantId: { type: 'string', format: 'uuid', example: 'tenant-123' },
+                    createdAt: { type: 'string', format: 'date-time' }
                 }
             },
-            ClientUser: {
+            PhoneNumberCreate: {
                 type: 'object',
-                required: ['client_id'],
+                required: ['phoneNumber', 'tenantId'],
                 properties: {
-                    client_id: { type: 'string', example: 'client-123' },
-                    first_name: { type: 'string', example: 'John' },
-                    last_name: { type: 'string', example: 'Doe' },
-                    email: { type: 'string', format: 'email', example: 'john.doe@example.com' },
-                    phone: { type: 'string', example: '+12345678900' },
-                    app_role_id: { type: 'string', example: 'role-456' },
-                    departments: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        example: ['sales', 'support']
-                    },
-                    is_active: { type: 'boolean', default: true }
+                    phoneNumber: { type: 'string', example: '+12345678900' },
+                    friendlyName: { type: 'string', example: 'Main Office' },
+                    tenantId: { type: 'string', example: 'tenant-123' }
                 }
             },
             
@@ -418,6 +352,21 @@ All API responses follow a consistent format:
                             }
                         }
                     }
+                }
+            },
+            
+            // Call Session Schemas
+            CallSession: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string', format: 'uuid', example: 'session-123' },
+                    callSid: { type: 'string', example: 'CA1234567890abcdef' },
+                    fromNumber: { type: 'string', example: '+12345678900' },
+                    toNumber: { type: 'string', example: '+19876543210' },
+                    status: { type: 'string', enum: ['initiated', 'ringing', 'answered', 'completed', 'failed'], example: 'active' },
+                    duration: { type: 'integer', example: 120 },
+                    tenantId: { type: 'string', format: 'uuid', example: 'tenant-123' },
+                    createdAt: { type: 'string', format: 'date-time' }
                 }
             }
         }

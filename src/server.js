@@ -45,8 +45,7 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files from public directory
-app.use(express.static('public'));
+// Static file serving removed - no frontend needed
 
 // Request logging
 app.use((req, res, next) => {
@@ -874,14 +873,7 @@ app.use('/api/mcp/ivr', ivrRoutes);
 app.use('/api/extensions', extensionRoutes);
 app.use('/api/signalwire', signalwireRoutes);
 
-// Serve HTML forms
-app.get('/', (req, res) => {
-  res.sendFile('index.html', { root: './public' });
-});
-
-app.get('/client', (req, res) => {
-  res.sendFile('client-form.html', { root: './public' });
-});
+// Frontend routes removed - no frontend needed
 
 // 404 handler
 app.use(notFound);
@@ -914,7 +906,7 @@ app.listen(PORT, async () => {
       
       // Log URLs for reference
       // console.log(`Supabase connection initialized with URL: ${process.env.SUPABASE_URL}`);
-      console.log(`Frontend available at http://localhost:${PORT}`);
+      console.log(`API Documentation available at http://localhost:${PORT}/api-docs`);
         
     } catch (error) {
         console.log("Error connecting to database:", error);

@@ -7,9 +7,79 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// @route   POST /api/signalwire/call/outbound
-// @desc    Create an outbound call
-// @access  Private (auth required)
+/**
+ * @swagger
+ * /api/signalwire/call/outbound:
+ *   post:
+ *     summary: Create an outbound call
+ *     description: Initiate an outbound call using SignalWire service
+ *     tags: [SignalWire]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/OutboundCall'
+ *           example:
+ *             from: "+12345678900"
+ *             to: "+19876543210"
+ *             tenantId: "tenant-123"
+ *             options:
+ *               recording: true
+ *               timeout: 30
+ *     responses:
+ *       200:
+ *         description: Call initiated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Outbound call initiated successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     callId:
+ *                       type: string
+ *                       example: "tenant-123_1234567890_abc123"
+ *                     callSid:
+ *                       type: string
+ *                       example: "CA1234567890abcdef"
+ *                     status:
+ *                       type: string
+ *                       example: "initiating"
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/call/outbound', [
     authenticateToken,
     body('from').notEmpty().withMessage('from number is required'),
@@ -128,9 +198,74 @@ router.post('/call/outbound', [
     }
 });
 
-// @route   POST /api/signalwire/sms/send
-// @desc    Send SMS message
-// @access  Private (auth required)
+/**
+ * @swagger
+ * /api/signalwire/sms/send:
+ *   post:
+ *     summary: Send SMS message
+ *     description: Send an SMS message using SignalWire service
+ *     tags: [SignalWire]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SMSMessage'
+ *           example:
+ *             from: "+12345678900"
+ *             to: "+19876543210"
+ *             body: "Hello from AI Receptionist!"
+ *             tenantId: "tenant-123"
+ *     responses:
+ *       200:
+ *         description: SMS sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "SMS sent successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     messageId:
+ *                       type: string
+ *                       example: "MSG1234567890abcdef"
+ *                     status:
+ *                       type: string
+ *                       example: "sent"
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/sms/send', [
     authenticateToken,
     body('from').notEmpty().withMessage('from number is required'),
@@ -215,9 +350,64 @@ router.post('/sms/send', [
     }
 });
 
-// @route   GET /api/signalwire/phone-numbers
-// @desc    Get phone numbers for a tenant
-// @access  Private (auth required)
+/**
+ * @swagger
+ * /api/signalwire/phone-numbers:
+ *   get:
+ *     summary: Get phone numbers for a tenant
+ *     description: Retrieve all phone numbers associated with a specific tenant
+ *     tags: [SignalWire]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: tenantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Tenant ID to get phone numbers for
+ *     responses:
+ *       200:
+ *         description: Phone numbers retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PhoneNumber'
+ *             example:
+ *               success: true
+ *               data:
+ *                 - id: "phone-123"
+ *                   phoneNumber: "+12345678900"
+ *                   friendlyName: "Main Office"
+ *                   status: "active"
+ *                   tenantId: "tenant-123"
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/phone-numbers', [
     authenticateToken
 ], async (req, res) => {

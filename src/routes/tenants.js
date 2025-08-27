@@ -10,9 +10,93 @@ const router = express.Router();
 router.use(authenticateToken);
 router.use(requireSuperAdmin);
 
-// @route   GET /api/tenants
-// @desc    Get all tenants (super admin only)
-// @access  Private (super admin only)
+/**
+ * @swagger
+ * /api/tenants:
+ *   get:
+ *     summary: Get all tenants (super admin only)
+ *     description: Retrieve a paginated list of all tenants in the system
+ *     tags: [Tenants]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of tenants per page
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for tenant name or domain
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, inactive]
+ *         description: Filter by tenant status
+ *     responses:
+ *       200:
+ *         description: Tenants retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     tenants:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Tenant'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/Pagination'
+ *             example:
+ *               success: true
+ *               data:
+ *                 tenants:
+ *                   - id: "tenant-123"
+ *                     name: "Acme Corporation"
+ *                     domain: "acme.com"
+ *                     status: "active"
+ *                     userCount: 25
+ *                     extensionCount: 10
+ *                 pagination:
+ *                   page: 1
+ *                   limit: 10
+ *                   total: 5
+ *                   totalPages: 1
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - super admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/', async (req, res) => {
     try {
         const { page = 1, limit = 10, search, status } = req.query;

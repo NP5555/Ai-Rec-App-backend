@@ -9,9 +9,97 @@ const router = express.Router();
 // Apply authentication to all routes
 router.use(authenticateToken);
 
-// @route   GET /api/extensions
-// @desc    Get all extensions for tenant
-// @access  Private (requires extensions:read permission)
+/**
+ * @swagger
+ * /api/extensions:
+ *   get:
+ *     summary: Get all extensions for tenant
+ *     description: Retrieve a paginated list of phone extensions for the current tenant
+ *     tags: [Extensions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of extensions per page
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for extension number or name
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, inactive]
+ *         description: Filter by extension status
+ *       - in: query
+ *         name: department
+ *         schema:
+ *           type: string
+ *         description: Filter by department name
+ *     responses:
+ *       200:
+ *         description: Extensions retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     extensions:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Extension'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/Pagination'
+ *             example:
+ *               success: true
+ *               data:
+ *                 extensions:
+ *                   - id: "ext-123"
+ *                     extensionNumber: "1001"
+ *                     name: "Sales Department"
+ *                     status: "active"
+ *                     departmentName: "Sales"
+ *                 pagination:
+ *                   page: 1
+ *                   limit: 10
+ *                   total: 15
+ *                   totalPages: 2
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/', requirePermission('extensions:read'), async (req, res) => {
     try {
         const { page = 1, limit = 10, search, status, department } = req.query;

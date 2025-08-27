@@ -8,9 +8,60 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// @route   POST /api/auth/login
-// @desc    Authenticate user & get token
-// @access  Public
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Authenticate user and get JWT token
+ *     description: Authenticate a user with email and password, return JWT token and user information
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/LoginRequest'
+ *           example:
+ *             email: "john.doe@example.com"
+ *             password: "password123"
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoginResponse'
+ *             example:
+ *               success: true
+ *               message: "Login successful"
+ *               data:
+ *                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 user:
+ *                   id: "user-123"
+ *                   email: "john.doe@example.com"
+ *                   firstName: "John"
+ *                   lastName: "Doe"
+ *                   status: "active"
+ *                 permissions: ["users:read", "users:write"]
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Invalid credentials or account inactive
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/login', [
     body('email', 'Please include a valid email').isEmail(),
     body('password', 'Password is required').exists()
@@ -153,9 +204,85 @@ router.post('/login', [
     }
 });
 
-// @route   POST /api/auth/register
-// @desc    Register a new user
-// @access  Private (requires admin permission)
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     description: Create a new user account (requires admin permission)
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password, firstName, lastName, roleIds]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "jane.smith@example.com"
+ *               password:
+ *                 type: string
+ *                 minLength: 6
+ *                 example: "securePassword123"
+ *               firstName:
+ *                 type: string
+ *                 example: "Jane"
+ *               lastName:
+ *                 type: string
+ *                 example: "Smith"
+ *               phone:
+ *                 type: string
+ *                 example: "+12345678900"
+ *               roleIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["role-123", "role-456"]
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *             example:
+ *               success: true
+ *               message: "User created successfully"
+ *               data:
+ *                 id: "user-456"
+ *                 email: "jane.smith@example.com"
+ *                 firstName: "Jane"
+ *                 lastName: "Smith"
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       409:
+ *         description: User already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/register', [
     authenticateToken,
     body('email', 'Please include a valid email').isEmail(),
@@ -293,9 +420,44 @@ router.post('/register', [
     }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current user profile
-// @access  Private
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Get current user profile
+ *     description: Retrieve the profile information of the currently authenticated user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *             example:
+ *               success: true
+ *               data:
+ *                 user:
+ *                   id: "user-123"
+ *                   email: "john.doe@example.com"
+ *                   firstName: "John"
+ *                   lastName: "Doe"
+ *                   tenantId: "tenant-123"
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/me', authenticateToken, async (req, res) => {
     try {
         res.json({
@@ -314,9 +476,40 @@ router.get('/me', authenticateToken, async (req, res) => {
     }
 });
 
-// @route   POST /api/auth/refresh
-// @desc    Refresh JWT token
-// @access  Private
+/**
+ * @swagger
+ * /api/auth/refresh:
+ *   post:
+ *     summary: Refresh JWT token
+ *     description: Generate a new JWT token for the currently authenticated user
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Token refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *             example:
+ *               success: true
+ *               message: "Token refreshed successfully"
+ *               data:
+ *                 token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/refresh', authenticateToken, async (req, res) => {
     try {
         // Create new JWT token
@@ -350,9 +543,38 @@ router.post('/refresh', authenticateToken, async (req, res) => {
     }
 });
 
-// @route   POST /api/auth/logout
-// @desc    Logout user (client-side token removal)
-// @access  Private
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Logout user
+ *     description: Logout the currently authenticated user (client-side token removal)
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *             example:
+ *               success: true
+ *               message: "Logged out successfully"
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.post('/logout', authenticateToken, async (req, res) => {
     try {
         // In a more advanced implementation, you might want to blacklist the token

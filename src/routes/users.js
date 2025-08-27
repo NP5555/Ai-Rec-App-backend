@@ -10,9 +10,99 @@ const router = express.Router();
 // Apply authentication to all routes
 router.use(authenticateToken);
 
-// @route   GET /api/users
-// @desc    Get all users for tenant
-// @access  Private (requires users:read permission)
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Get all users for tenant
+ *     description: Retrieve a paginated list of users for the current tenant with optional filtering
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of users per page
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for email, first name, or last name
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [active, inactive, suspended]
+ *         description: Filter by user status
+ *       - in: query
+ *         name: role
+ *         schema:
+ *           type: string
+ *         description: Filter by role name
+ *     responses:
+ *       200:
+ *         description: Users retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     users:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/User'
+ *                     pagination:
+ *                       $ref: '#/components/schemas/Pagination'
+ *             example:
+ *               success: true
+ *               data:
+ *                 users:
+ *                   - id: "user-123"
+ *                     email: "john.doe@example.com"
+ *                     firstName: "John"
+ *                     lastName: "Doe"
+ *                     status: "active"
+ *                     roles:
+ *                       - name: "Admin"
+ *                 pagination:
+ *                   page: 1
+ *                   limit: 10
+ *                   total: 25
+ *                   totalPages: 3
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - insufficient permissions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 router.get('/', requirePermission('users:read'), async (req, res) => {
     try {
         const { page = 1, limit = 10, search, status, role } = req.query;
